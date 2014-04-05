@@ -1,0 +1,13 @@
+*~
+
+# C files
+*.lo
+*.o
+*.la
+*.a
+
+# Python files
+*.py[cod]
+
+# Slurm build
+slurm-14.03.0/*
