@@ -16,6 +16,7 @@ LINKS_ROOT="${PROJECT_ROOT}/${LINKS_DIR}"
 #echo $HOSTNAME
 #echo $PROJECT_ROOT
 #echo $APP_ROOT
+#echo $LINKS_ROOT
 
 if [ "$1" = "startup" ] || [ "$1" = "reset" ]; then
 
@@ -38,6 +39,7 @@ if [ "$1" = "startup" ] || [ "$1" = "reset" ]; then
     cp -r ${BRANCH}/* ${SLURM_VER}/
 
     cd $SLURM_VER
+    ./autogen.sh || exit 1
     ./configure --prefix=$APP_ROOT --enable-multiple-slurmd --without-munge --with-ssl
     make -s
     make -s install
@@ -68,28 +70,42 @@ elif [ "$1" = "config" ] || [ "$1" = "db_config" ]; then
 
 elif [ "$1" = "make" ]; then
 
-    #SCHED_DIR="/src/plugins/sched/ostrich"
-    #SCHED_DIR="/src/plugins/sched/"
+    SCHED_DIR="/src/plugins/priority/ostrich"
 
-    #cp -r ${BRANCH}${SCHED_DIR}/* ${SLURM_VER}${SCHED_DIR}/
+    cp -r ${BRANCH}${SCHED_DIR}/* ${SLURM_VER}${SCHED_DIR}/
 
-    #SCHEDULERS=${SLURM_VER}${SCHED_DIR}
+    SCHEDULERS=${SLURM_VER}${SCHED_DIR}
 
-    #make -s -C $SCHEDULERS
+    make -s -C $SCHEDULERS
 
-    #if [ $? -eq 0 ]; then
-        #make -s -C $SCHEDULERS install > /dev/null
-        #echo "done"
-    #else
-        #echo "errors found"
-    #fi
+    if [ $? -eq 0 ]; then
+        make -s -C $SCHEDULERS install &> /dev/null
+        echo "done"
+    else
+        echo "errors found"
+    fi
 
 elif [ "$1" = "cleanup" ]; then
 
     rm -rf $SLURM_VER $APP_DIR $LINKS_DIR
     python clean.py
 
+elif [ "$1" = "patch" ]; then
+
+    BEFORE="TMP_BEFORE"
+    AFTER="TMP_AFTER"
+
+    mkdir $BEFORE $AFTER
+    tar -xf ${SLURM_VER}".tar.bz2" -C $BEFORE --strip-components=1
+    tar -xf ${SLURM_VER}".tar.bz2" -C $AFTER --strip-components=1
+
+    python clean.py
+    cp -r ${BRANCH}/* ${AFTER}/
+    diff -Naur $BEFORE $AFTER > "ostrich_patch_"${SLURM_VER}
+
+    rm -rf $BEFORE $AFTER
+
 else
     echo "Available commands:"
-    echo "startup/reset, links, config, make, cleanup"
+    echo "startup/reset, links, config, make, cleanup, patch"
 fi
