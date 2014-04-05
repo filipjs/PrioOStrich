@@ -11,3 +11,5 @@
 
 # Slurm build
 slurm-14.03.0/*
+deployment/*
+links/*
