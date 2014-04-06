@@ -26,10 +26,9 @@ if [ "$1" = "startup" ] || [ "$1" = "reset" ]; then
         exit 1
     fi
 
-    rm -rf $LINKS_DIR
     rm -rf $APP_DIR
+    rm -rf $LINKS_DIR
 
-    mkdir -p ${LINKS_DIR}
     mkdir -p ${APP_DIR}
     mkdir ${APP_DIR}"/var" ${APP_DIR}"/etc"
 
@@ -47,10 +46,11 @@ if [ "$1" = "startup" ] || [ "$1" = "reset" ]; then
 
 elif [ "$1" = "links" ]; then
 
-    ln -sf ${APP_ROOT}"/bin/*" -t ${LINKS_ROOT}
-    ln -sf ${APP_ROOT}"/sbin/*" -t ${LINKS_ROOT}
-    ln -sf ${APP_ROOT}"/var" ${LINKS_ROOT}"/var"
-    ln -sf ${APP_ROOT}"/etc" ${LINKS_ROOT}"/etc"
+    mkdir -p ${LINKS_DIR}
+    ln -sf ${APP_ROOT}/bin/* -t ${LINKS_ROOT}
+    ln -sf ${APP_ROOT}/sbin/* -t ${LINKS_ROOT}
+    ln -sf ${APP_ROOT}/var -t ${LINKS_ROOT}
+    ln -sf ${APP_ROOT}/etc -t ${LINKS_ROOT}
 
 elif [ "$1" = "config" ] || [ "$1" = "db_config" ]; then
 
