@@ -12,7 +12,71 @@ const char plugin_type[]       	= "priority/ostrich";
 const uint32_t plugin_version	= 100;
 
 
+/*********************** local structures *********************/
+
+/*********************** local variables **********************/
+static bool stop_thread = false;
+static bool config_flag = false;
+static bool priority_debug = false;
+
+static uint32_t schedule_interval;
+static uint32_t threshold;
+
+static time_t last_sched_time;		/* time of last scheduling pass */
+
+/*********************** local functions **********************/
+
+/*********************** operations on lists ******************/
+
+/*********************** implementation ***********************/
+
 // TODO
+
+
+static void _load_config(void)
+{
+	char *select_type, *preempt_type;
+	uint32_t req_job_age;
+
+	// TODO temporary fix, since we cannot add custom parameters like in plugins/scheduler
+	schedule_interval = slurm_get_priority_calc_period();
+	threshold = slurm_get_priority_decay_hl();
+
+	if (slurm_get_debug_flags() & DEBUG_FLAG_PRIO)
+		priority_debug = 1;
+	else
+		priority_debug = 0;
+
+	// TODO
+// 	if (slurm_get_priority_favor_small())
+// 		sort = sjb;
+// 	else
+// 		sort = fifo / longest job first??;
+
+	if (priority_debug) {
+		info("priority: Interval is %u", schedule_interval);
+		info("priority: Threshold is %u", threshold);
+	}
+
+// TODO _job_resources based on "select type"
+//	select_type = slurm_get_select_type();
+//	if (strcmp(select_type, "select/serial"))
+//		fatal("OStrich: scheduler supports only select/serial (%s given)",
+//			select_type);
+//	xfree(select_type);
+
+	preempt_type = slurm_get_preempt_type();
+	if (strcmp(preempt_type, "preempt/none"))
+		fatal("OStrich: scheduler supports only preempt/none (%s given)", preempt_type);
+	xfree(preempt_type);
+
+	if (slurm_get_preempt_mode() != PREEMPT_MODE_OFF)
+		fatal("OStrich: scheduler supports only PreemptMode=OFF");
+
+	req_job_age = 4 * schedule_interval;
+	if (slurmctld_conf.min_job_age > 0 && slurmctld_conf.min_job_age < req_job_age)
+		fatal("OStrich: MinJobAge must be greater or equal to %d", req_job_age);
+}
 
 
 /*
@@ -71,16 +135,16 @@ extern double priority_p_calc_fs_factor(long double usage_efctv,
 	 * non-multifactor machine to a multifactor machine.  It
 	 * doesn't do anything on regular systems, it should always
 	 * return 0 since shares_norm will always be NO_VAL. */
-	double priority_fs;
-
-	xassert(!fuzzy_equal(usage_efctv, NO_VAL));
-
-	if ((shares_norm <= 0.0) || fuzzy_equal(shares_norm, NO_VAL))
-		priority_fs = 0.0;
-	else
-		priority_fs = pow(2.0, -(usage_efctv / shares_norm));
-
-	return priority_fs;
+// 	double priority_fs;
+//
+// 	xassert(!fuzzy_equal(usage_efctv, NO_VAL));
+//
+// 	if ((shares_norm <= 0.0) || fuzzy_equal(shares_norm, NO_VAL))
+// 		priority_fs = 0.0;
+// 	else
+// 		priority_fs = pow(2.0, -(usage_efctv / shares_norm));
+//
+// 	return priority_fs;
 }
 
 extern List priority_p_get_priority_factors_list(

@@ -2,5 +2,7 @@ Tutorial:
 1) TODO
 
 
-Required assumptions about SLURM:
-1) TODO
+Required SLURM support:
+1) finished jobs won't be deleted before reading final data
+	- configuration parameter 'MinJobAge'
+ 
