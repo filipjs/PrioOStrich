@@ -19,12 +19,22 @@ static bool stop_thread = false;
 static bool config_flag = false;
 static bool priority_debug = false;
 
+static pthread_t ostrich_thread = 0;
+static pthread_mutex_t term_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t  term_cond = PTHREAD_COND_INITIALIZER;
+
 static uint32_t schedule_interval;
 static uint32_t threshold;
 
 static time_t last_sched_time;		/* time of last scheduling pass */
 
 /*********************** local functions **********************/
+static void _load_config(void);
+//static void _update_struct(void);
+static void _my_sleep(int secs);
+
+static void _stop_ostrich_agent(void);
+static void *_ostrich_agent(void *no_data);
 
 /*********************** operations on lists ******************/
 
@@ -39,7 +49,8 @@ static void _load_config(void)
 	uint32_t req_job_age;
 
 	// TODO temporary fix, since we cannot add custom parameters like in plugins/scheduler
-	schedule_interval = slurm_get_priority_calc_period();
+	// FIXME interval is in minutes, we need seconds
+	schedule_interval = slurm_get_priority_calc_period() / 60;
 	threshold = slurm_get_priority_decay_hl();
 
 	if (slurm_get_debug_flags() & DEBUG_FLAG_PRIO)
@@ -78,6 +89,37 @@ static void _load_config(void)
 		fatal("OStrich: MinJobAge must be greater or equal to %d", req_job_age);
 }
 
+static void _my_sleep(int secs)
+{
+	struct timespec ts = {0, 0};
+
+	ts.tv_sec = time(NULL) + secs;
+	pthread_mutex_lock(&term_lock);
+	if (!stop_thread)
+		pthread_cond_timedwait(&term_cond, &term_lock, &ts);
+	pthread_mutex_unlock(&term_lock);
+}
+
+static void _stop_ostrich_agent(void)
+{
+	pthread_mutex_lock(&term_lock);
+	stop_thread = true;
+	pthread_cond_signal(&term_cond);
+	pthread_mutex_unlock(&term_lock);
+
+}
+
+static void *_ostrich_agent(void *no_data)
+{
+	_load_config();
+
+	while (!stop_thread) {
+		debug("SLEEPING");
+		_my_sleep(schedule_interval);
+	}
+	debug("OSTRICH THREAD ENDED");
+}
+
 
 /*
  * init() is called when the plugin is loaded, before any other functions
@@ -85,13 +127,34 @@ static void _load_config(void)
  */
 int init ( void )
 {
+	pthread_attr_t attr;
+
 	debug("%s loaded", plugin_name);
+
+	if (ostrich_thread) {
+		debug2("OStrich: priority thread already running, "
+			"not starting another");
+		return SLURM_ERROR;
+	}
+
+	slurm_attr_init(&attr);
+	if (pthread_create(&ostrich_thread, &attr, _ostrich_agent, NULL))
+		fatal("OStrich: unable to start priority thread");
+	slurm_attr_destroy(&attr);
+
 	return SLURM_SUCCESS;
 }
 
 int fini ( void )
 {
 	debug("%s ended", plugin_name);
+
+	if (ostrich_thread) {
+		_stop_ostrich_agent();
+		pthread_join(ostrich_thread, NULL);
+		ostrich_thread = 0;
+	}
+
 	return SLURM_SUCCESS;
 }
 
