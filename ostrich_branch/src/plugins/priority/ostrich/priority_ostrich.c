@@ -100,6 +100,8 @@ int fini ( void )
 
 extern uint32_t priority_p_set(uint32_t last_prio, struct job_record *job_ptr)
 {
+	return 1;
+
 	uint32_t new_prio = 1;
 
 	if (job_ptr->direct_set_prio && (job_ptr->priority > 1))
@@ -131,6 +133,8 @@ extern void priority_p_set_assoc_usage(slurmdb_association_rec_t *assoc)
 extern double priority_p_calc_fs_factor(long double usage_efctv,
 					long double shares_norm)
 {
+	return 1;
+
 	/* This calculation is needed for sshare when ran from a
 	 * non-multifactor machine to a multifactor machine.  It
 	 * doesn't do anything on regular systems, it should always
@@ -155,6 +159,9 @@ extern List priority_p_get_priority_factors_list(
 
 extern void priority_p_job_end(struct job_record *job_ptr)
 {
+	return;
+
+	//TODO
 	uint64_t unused_cpu_run_secs = 0;
 	uint64_t time_limit_secs = (uint64_t)job_ptr->time_limit * 60;
 	slurmdb_association_rec_t *assoc_ptr;
