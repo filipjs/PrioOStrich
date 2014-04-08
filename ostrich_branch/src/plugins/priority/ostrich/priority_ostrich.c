@@ -91,6 +91,7 @@ int init ( void )
 
 int fini ( void )
 {
+	debug("%s ended", plugin_name);
 	return SLURM_SUCCESS;
 }
 

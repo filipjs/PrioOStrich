@@ -71,7 +71,6 @@ AccountingStorageType=accounting_storage/none
 ClusterName=cluster
 DebugFlags=Priority
 JobCompType=jobcomp/none
-JobContainerPlugin=job_container/none
 JobAcctGatherType=jobacct_gather/none
 SlurmctldDebug=3
 SlurmctldLogFile={APP_ROOT}/var/log/slurmctld.log

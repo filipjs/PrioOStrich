@@ -30,7 +30,8 @@ if [ "$1" = "startup" ] || [ "$1" = "reset" ]; then
     rm -rf $LINKS_DIR
 
     mkdir -p ${APP_DIR}
-    mkdir ${APP_DIR}"/var" ${APP_DIR}"/etc"
+    mkdir -p ${APP_DIR}"/etc"
+    mkdir -p ${APP_DIR}"/var/run" ${APP_DIR}"/var/spool" ${APP_DIR}"/var/log/"
 
     rm -rf $SLURM_VER
     tar -xf ${SLURM_VER}".tar.bz2"
