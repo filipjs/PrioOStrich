@@ -311,30 +311,35 @@ extern uint32_t priority_p_set(uint32_t last_prio, struct job_record *job_ptr)
 {
 	if (job_ptr->direct_set_prio)
 		return job_ptr->priority;
-
-	// TODO DOUBLE CHECK JAKIE SA LOCKI, CZY POTRZEBA JEDNAK MUTEXA??
+	//TODO DODAC TUTAJ TEZ OD RAZU REZERWACJE??
+	// TODO JAK SIE PRACA ZMIENI TO PO PORSTU WYWOLANE BEDZIE JESZCZE RAZ
 	list_enqueue(incoming_jobs, job_ptr);
 	return 1;
 }
 
 extern void priority_p_reconfig(bool assoc_clear)
 {
-	// TODO DOUBLE CHECK JAKIE SA LOCKI, CZY POTRZEBA JEDNAK MUTEXA??
+	// FIXME NIE MA LOCKOW!!!
+	// TO ZNACZY ZE "MOZE" SIE ZDAZYC ZE PETLA BEDZIE ZE STARYM KONFIKIEM AKA NIE BEDZIE STRUCTOW
+	// --> ZMINIEC ASSERTY NA ERRORY I DZIALAC DALEJ??
 	debug("RIIIIICONFIG");
 	// TODO FIXME TYLKO PRZY RECONFIGU, NIE ODPALA SIE PRZY PARTITION UPDATE....
 	_load_config();
 	_update_struct();
+	// TODO TYLKO ZMIANA FLAGI TUTAJ A NIE RECONFIG
 	return;
 }
 
 extern void priority_p_set_assoc_usage(slurmdb_association_rec_t *assoc)
 {
+	// TODO DOUBLE CHECK JAKIE SA LOCKI, CZY POTRZEBA JEDNAK MUTEXA??
 	return;
 }
 
 extern double priority_p_calc_fs_factor(long double usage_efctv,
 					long double shares_norm)
 {
+	// TODO DOUBLE CHECK JAKIE SA LOCKI, CZY POTRZEBA JEDNAK MUTEXA??
 	return 1;
 
 	/* This calculation is needed for sshare when ran from a
@@ -356,11 +361,13 @@ extern double priority_p_calc_fs_factor(long double usage_efctv,
 extern List priority_p_get_priority_factors_list(
 	priority_factors_request_msg_t *req_msg, uid_t uid)
 {
+	// TODO DOUBLE CHECK JAKIE SA LOCKI, CZY POTRZEBA JEDNAK MUTEXA??
 	return(list_create(NULL));
 }
 
 extern void priority_p_job_end(struct job_record *job_ptr)
 {
+	// TODO DOUBLE CHECK JAKIE SA LOCKI, CZY POTRZEBA JEDNAK MUTEXA??
 	return;
 
 	//TODO

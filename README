@@ -2,8 +2,12 @@ Tutorial:
 1) TODO
 
 
-Required SLURM support:
+Required SLURM support (checked as of 14.03):
 1) finished jobs won't be deleted before reading final data
 	- configuration parameter 'MinJobAge'
-2) jobs are removed on partition removal / name change (OK as of 14.03)
+2) jobs are removed on partition removal / name change
+	- OK
+3) "priority_p_set" calls inside slurmctld_lock_t (write jobs)
+	- OK
+4) 
 
