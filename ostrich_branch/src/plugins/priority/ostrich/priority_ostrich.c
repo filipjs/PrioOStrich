@@ -8,6 +8,8 @@
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
 
+#define INTERVAL 10
+#define THRESHOLD 60 * 15
 
 #define DEFAULT_PART_LIMIT 60 * 24 * 7
 #define DEFAULT_JOB_LIMIT  60 * 24 * 7 * 365
@@ -70,8 +72,8 @@ static pthread_t ostrich_thread = 0;
 static pthread_mutex_t term_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t  term_cond = PTHREAD_COND_INITIALIZER;
 
-static uint32_t schedule_interval;
-static uint32_t threshold;
+static uint32_t schedule_interval = INTERVAL;
+static uint32_t threshold = THRESHOLD;
 
 static List ostrich_sched_list;		/* list of ostrich_schedule entries */
 static List incoming_jobs;		/* list of jobs entering the system */
@@ -124,14 +126,33 @@ static void _list_delete_user(struct ostrich_user *user)
 
 static void _load_config(void)
 {
-	char *select_type, *preempt_type;
+	char *prio_params, *select_type, *preempt_type, *tmp_ptr;
 	uint32_t req_job_age;
 
 	// TODO temporary fix, since we cannot add custom parameters like in plugins/scheduler
 	// FIXME interval is in minutes, we need seconds
 	schedule_interval = slurm_get_priority_calc_period() / 60;
-	threshold = slurm_get_priority_decay_hl();
+	
+	prio_params = slurm_get_priority_params();
+	
+	if (prio_params && (tmp_ptr=strstr(prio_params, "threshold=")))
+		threshold = atoi(tmp_ptr + 10);
+	if (threshold < 0)
+		fatal("OStrich: invalid threshold: %d", threshold);
 
+// 	if (priority_debug) {
+	if (1) {
+		info("params: %s", prio_params);
+		info("priority: Interval is %u", schedule_interval);
+		info("priority: Threshold is %u", threshold);
+	}
+
+	xfree(prio_params);
+
+	// TODO ZNALEZC SKAD WZIAC PROTOCOL VERSION
+// 	protocol_version >= SLURM_14_03_PROTOCOL_VERSION
+	
+	//TODO SPRWADZAC SCHED TYPE -> NIE DZIALA Z WIKI
 	if (slurm_get_debug_flags() & DEBUG_FLAG_PRIO)
 		priority_debug = 1;
 	else
@@ -143,10 +164,7 @@ static void _load_config(void)
 // 	else
 // 		sort = fifo / longest job first??;
 
-	if (priority_debug) {
-		info("priority: Interval is %u", schedule_interval);
-		info("priority: Threshold is %u", threshold);
-	}
+
 
 // TODO _job_resources based on "select type"
 //	select_type = slurm_get_select_type();
