@@ -9,7 +9,7 @@
 #include "src/common/xstring.h"
 
 #define INTERVAL 10
-#define THRESHOLD 60 * 15
+#define THRESHOLD 60 * 20
 
 #define DEFAULT_PART_LIMIT 60 * 24 * 7
 #define DEFAULT_JOB_LIMIT  60 * 24 * 7 * 365
@@ -75,12 +75,17 @@ static pthread_cond_t  term_cond = PTHREAD_COND_INITIALIZER;
 static uint32_t schedule_interval = INTERVAL;
 static uint32_t threshold = THRESHOLD;
 
-static List ostrich_sched_list;		/* list of ostrich_schedule entries */
+static List ostrich_sched_list;	/* list of ostrich_schedule entries */
 static List incoming_jobs;		/* list of jobs entering the system */
 
 static time_t last_sched_time;		/* time of last scheduling pass */
 
 /*********************** local functions **********************/
+static uint32_t (*_job_resources)(struct job_record *job_ptr);
+static uint32_t _serial_resources(struct job_record *job_ptr);
+static uint32_t _linear_resources(struct job_record *job_ptr);
+static uint32_t _cons_resources(struct job_record *job_ptr);
+
 static void _load_config(void);
 static void _update_struct(void);
 static void _my_sleep(int secs);
@@ -121,71 +126,111 @@ static void _list_delete_user(struct ostrich_user *user)
 
 /*********************** implementation ***********************/
 
-// TODO
+
+/* _***_resources - calculate the number of cpus used by the job */
+static uint32_t _serial_resources(struct job_record *job_ptr)
+{
+	// TODO
+	return 0;
+}
+
+static uint32_t _linear_resources(struct job_record *job_ptr)
+{
+	// TODO 
+	return 0;
+}
+
+static uint32_t _cons_resources(struct job_record *job_ptr)
+{
+	info("C-C-C-C-C-CONS resources");
+	return 0;
+
+	if (IS_JOB_STARTED(job_ptr))
+		return job_ptr->total_cpus;
+	else
+		/* pending, give an estimate */
+		//TODO better estimate based on "select type"
+		return job_ptr->details->cpus_per_task;
+}
 
 
 static void _load_config(void)
 {
-	char *prio_params, *select_type, *preempt_type, *tmp_ptr;
+	char *sched_type, *select_type, *preempt_type, *tmp_ptr;
 	uint32_t req_job_age;
 
-	// TODO temporary fix, since we cannot add custom parameters like in plugins/scheduler
-	// FIXME interval is in minutes, we need seconds
-	schedule_interval = slurm_get_priority_calc_period() / 60;
+// 	if (protocol_version >= SLURM_14_10_PROTOCOL_VERSION) // TODO FIXME
+	if (1) {
+		char *prio_params = slurm_get_priority_params();
 	
-	prio_params = slurm_get_priority_params();
-	
-	if (prio_params && (tmp_ptr=strstr(prio_params, "threshold=")))
-		threshold = atoi(tmp_ptr + 10);
+		if (prio_params && (tmp_ptr=strstr(prio_params, "interval=")))
+			schedule_interval = atoi(tmp_ptr + 9);
+		if (prio_params && (tmp_ptr=strstr(prio_params, "threshold=")))
+			threshold = atoi(tmp_ptr + 10);
+//TODO ZMIENIC THRESHOLD NA MINUTY W CONFIGU??
+		xfree(prio_params);
+	} else {
+		// 'fix' in versions without 'PriorityParameters'
+		// interval is in minutes, we need seconds
+		schedule_interval = slurm_get_priority_calc_period() / 60;
+		threshold = slurm_get_priority_decay_hl();
+	}
+
+	if (schedule_interval < 1)
+		fatal("OStrich: invalid interval: %d", schedule_interval);
 	if (threshold < 0)
 		fatal("OStrich: invalid threshold: %d", threshold);
 
-// 	if (priority_debug) {
-	if (1) {
-		info("params: %s", prio_params);
-		info("priority: Interval is %u", schedule_interval);
-		info("priority: Threshold is %u", threshold);
-	}
+	info("OStrich: Interval is %u", schedule_interval);
+	info("OStrich: Threshold is %u", threshold);
 
-	xfree(prio_params);
-
-	// TODO ZNALEZC SKAD WZIAC PROTOCOL VERSION
-// 	protocol_version >= SLURM_14_03_PROTOCOL_VERSION
-	
-	//TODO SPRWADZAC SCHED TYPE -> NIE DZIALA Z WIKI
-	if (slurm_get_debug_flags() & DEBUG_FLAG_PRIO)
-		priority_debug = 1;
-	else
-		priority_debug = 0;
-
-	// TODO
+// TODO
 // 	if (slurm_get_priority_favor_small())
 // 		sort = sjb;
 // 	else
 // 		sort = fifo / longest job first??;
 
+	select_type = slurm_get_select_type();
+	if (strcmp(select_type, "select/serial") == 0)
+		_job_resources = _serial_resources;
+	else if (strcmp(select_type, "select/linear") == 0)
+		_job_resources = _linear_resources;
+	else if (strcmp(select_type, "select/cons_res") == 0)
+		_job_resources = _cons_resources;
+	else
+		xassert (0); // TODO FIXME A CO DLA SELECT/CRAY SELECT/BLUEGENE??
+	xfree(select_type);
 
+	_job_resources(NULL); //TODO DELETE
 
-// TODO _job_resources based on "select type"
-//	select_type = slurm_get_select_type();
-//	if (strcmp(select_type, "select/serial"))
-//		fatal("OStrich: scheduler supports only select/serial (%s given)",
-//			select_type);
-//	xfree(select_type);
+	if (slurm_get_debug_flags() & DEBUG_FLAG_PRIO)
+		priority_debug = 1;
+	else
+		priority_debug = 0;
+	
+	sched_type = slurm_get_sched_type();
+	if (strcmp(sched_type, "sched/builtin") &&
+	    strcmp(sched_type, "sched/backfill"))
+		fatal("OStrich: supports only sched/builtin or sched/backfill");
+	xfree(sched_type);
 
 	preempt_type = slurm_get_preempt_type();
 	if (strcmp(preempt_type, "preempt/none"))
-		fatal("OStrich: scheduler supports only preempt/none (%s given)", preempt_type);
+		fatal("OStrich: supports only preempt/none");
 	xfree(preempt_type);
 
 	if (slurm_get_preempt_mode() != PREEMPT_MODE_OFF)
-		fatal("OStrich: scheduler supports only PreemptMode=OFF");
+		fatal("OStrich: supports only PreemptMode=OFF");
 
 	req_job_age = 4 * schedule_interval;
 	if (slurmctld_conf.min_job_age > 0 && slurmctld_conf.min_job_age < req_job_age)
 		fatal("OStrich: MinJobAge must be greater or equal to %d", req_job_age);
 }
 
+/* _update_struct - update the internal list of virtual schedules,
+ *	keep one schedule per existing partition
+ * global: part_list - pointer to global partition list
+ */
 static void _update_struct(void)
 {
 	struct ostrich_schedule *sched;

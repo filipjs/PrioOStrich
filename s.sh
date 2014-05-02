@@ -33,8 +33,8 @@ if [ "$1" = "startup" ] || [ "$1" = "reset" ]; then
     mkdir -p ${APP_DIR}"/etc"
     mkdir -p ${APP_DIR}"/var/run" ${APP_DIR}"/var/spool" ${APP_DIR}"/var/log/"
 
-    #rm -rf $SLURM_VER
-    #tar -xf ${SLURM_VER}".tar.bz2"
+    rm -rf $SLURM_VER
+    tar -xf ${SLURM_VER}".tar.bz2"
 
     cp -r ${BRANCH}/* ${SLURM_VER}/
 

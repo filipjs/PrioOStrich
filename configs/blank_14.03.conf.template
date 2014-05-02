@@ -106,6 +106,7 @@ SelectType=select/linear
 # JOB PRIORITY
 #PriorityFlags=
 #PriorityType=priority/basic
+#PriorityParameters=
 #PriorityDecayHalfLife=
 #PriorityCalcPeriod=
 #PriorityFavorSmall=
