@@ -56,7 +56,7 @@ struct ostrich_schedule {		/* one virtual schedule per partition */
 	char *part_name;		/* name of the partition */
 	uint16_t priority;		/* scheduling priority of the partition */
 	uint32_t max_time;		/* maximum time for jobs in the partition */
-	//uint32_t cpus_pn; // TODO POTRZEBNE??
+	uint32_t cpus_pn;		/* average number of cpus per node in the partition */
 
 	double total_shares;		/* total number of time shares from active users */
 
@@ -69,6 +69,7 @@ static bool config_flag = false;
 static bool priority_debug = false;
 
 static pthread_t ostrich_thread = 0;
+static pthread_mutex_t thread_flag_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t term_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t  term_cond = PTHREAD_COND_INITIALIZER;
 
@@ -131,20 +132,19 @@ static void _list_delete_user(struct ostrich_user *user)
 static uint32_t _serial_resources(struct job_record *job_ptr)
 {
 	// TODO
+	xassert (0);
 	return 0;
 }
 
 static uint32_t _linear_resources(struct job_record *job_ptr)
 {
 	// TODO 
+	xassert (0);
 	return 0;
 }
 
 static uint32_t _cons_resources(struct job_record *job_ptr)
 {
-	info("C-C-C-C-C-CONS resources");
-	return 0;
-
 	if (IS_JOB_STARTED(job_ptr))
 		return job_ptr->total_cpus;
 	else
@@ -163,22 +163,24 @@ static void _load_config(void)
 	if (1) {
 		char *prio_params = slurm_get_priority_params();
 	
+		// from PriorityParameters: 
+		// interval is in seconds, threshold in minutes
 		if (prio_params && (tmp_ptr=strstr(prio_params, "interval=")))
 			schedule_interval = atoi(tmp_ptr + 9);
 		if (prio_params && (tmp_ptr=strstr(prio_params, "threshold=")))
-			threshold = atoi(tmp_ptr + 10);
-//TODO ZMIENIC THRESHOLD NA MINUTY W CONFIGU??
+			threshold = atoi(tmp_ptr + 10) * 60;
+
 		xfree(prio_params);
 	} else {
 		// 'fix' in versions without 'PriorityParameters'
-		// interval is in minutes, we need seconds
+		// calc_period is in minutes, we need seconds for interval
 		schedule_interval = slurm_get_priority_calc_period() / 60;
 		threshold = slurm_get_priority_decay_hl();
 	}
 
 	if (schedule_interval < 1)
 		fatal("OStrich: invalid interval: %d", schedule_interval);
-	if (threshold < 0)
+	if (threshold < 60)
 		fatal("OStrich: invalid threshold: %d", threshold);
 
 	info("OStrich: Interval is %u", schedule_interval);
@@ -200,8 +202,6 @@ static void _load_config(void)
 	else
 		xassert (0); // TODO FIXME A CO DLA SELECT/CRAY SELECT/BLUEGENE??
 	xfree(select_type);
-
-	_job_resources(NULL); //TODO DELETE
 
 	if (slurm_get_debug_flags() & DEBUG_FLAG_PRIO)
 		priority_debug = 1;
@@ -242,10 +242,8 @@ static void _update_struct(void)
 
 	while ((sched = (struct ostrich_schedule *) list_next(iter))) {
 		part_ptr = find_part_record(sched->part_name);
-		if (!part_ptr) {
+		if (!part_ptr)
 			list_delete_item(iter);
-			debug("REMOVING %s", sched->part_name);
-		}
 	}
 
 	list_iterator_destroy(iter);
@@ -256,7 +254,6 @@ static void _update_struct(void)
 	while ((part_ptr = (struct part_record *) list_next(iter))) {
 		sched = _find_schedule(part_ptr->name);
 		if (!sched) {
-			debug("NEEEEW SCHED YO %s", part_ptr->name);
 			sched = xmalloc(sizeof(struct ostrich_schedule));
 			sched->part_name = xstrdup(part_ptr->name);
 			sched->total_shares = 0;
@@ -273,11 +270,10 @@ static void _update_struct(void)
 		else
 			sched->max_time = part_ptr->max_time;
 		/* Set/update average cpu count. */
-		// TODO POTRZEBNE??
-/*		if (part_ptr->total_nodes >= part_ptr->total_cpus)
+		if (part_ptr->total_nodes >= part_ptr->total_cpus)
 			sched->cpus_per_node = 1;
 		else
-			sched->cpus_per_node = part_ptr->total_cpus / part_ptr->total_nodes;*/
+			sched->cpus_per_node = part_ptr->total_cpus / part_ptr->total_nodes;
 	}
 
 	list_iterator_destroy(iter);
@@ -339,9 +335,11 @@ int init ( void )
 
 	verbose("OStrich: plugin loaded");
 
+	pthread_mutex_lock(&thread_flag_lock);
 	if (ostrich_thread) {
 		debug2("OStrich: priority thread already running, "
 			"not starting another");
+		pthread_mutex_unlock(&thread_flag_lock);
 		return SLURM_ERROR;
 	}
 
@@ -350,6 +348,7 @@ int init ( void )
 		fatal("OStrich: unable to start priority thread");
 	slurm_attr_destroy(&attr);
 
+	pthread_mutex_unlock(&thread_flag_lock);
 	return SLURM_SUCCESS;
 }
 
@@ -357,12 +356,14 @@ int fini ( void )
 {
 	verbose("OStrich: plugin shutting down");
 
+	pthread_mutex_lock(&thread_flag_lock);
 	if (ostrich_thread) {
 		_stop_ostrich_agent();
 		pthread_join(ostrich_thread, NULL);
 		ostrich_thread = 0;
 	}
 
+	pthread_mutex_unlock(&thread_flag_lock);
 	return SLURM_SUCCESS;
 }
 
@@ -372,24 +373,18 @@ int fini ( void )
 
 extern uint32_t priority_p_set(uint32_t last_prio, struct job_record *job_ptr)
 {
+	// NOTE: must be called while holding slurmctld_lock_t
 	if (job_ptr->direct_set_prio)
 		return job_ptr->priority;
 	//TODO DODAC TUTAJ TEZ OD RAZU REZERWACJE??
-	// TODO JAK SIE PRACA ZMIENI TO PO PORSTU WYWOLANE BEDZIE JESZCZE RAZ
+	//TODO JAK SIE PRACA ZMIENI TO PO PORSTU WYWOLANE BEDZIE JESZCZE RAZ
 	list_enqueue(incoming_jobs, job_ptr);
 	return 1;
 }
 
 extern void priority_p_reconfig(bool assoc_clear)
 {
-	// FIXME NIE MA LOCKOW!!!
-	// TO ZNACZY ZE "MOZE" SIE ZDAZYC ZE PETLA BEDZIE ZE STARYM KONFIKIEM AKA NIE BEDZIE STRUCTOW
-	// --> ZMINIEC ASSERTY NA ERRORY I DZIALAC DALEJ??
-	debug("RIIIIICONFIG");
-	// TODO FIXME TYLKO PRZY RECONFIGU, NIE ODPALA SIE PRZY PARTITION UPDATE....
-	_load_config();
-	_update_struct();
-	// TODO TYLKO ZMIANA FLAGI TUTAJ A NIE RECONFIG
+	config_flag = true;
 	return;
 }
 

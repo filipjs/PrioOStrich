@@ -5,9 +5,13 @@ Tutorial:
 Required SLURM support (checked as of 14.03):
 1) finished jobs won't be deleted before reading final data
 	- configuration parameter 'MinJobAge'
-2) jobs are removed on partition removal / name change
+2) jobs are removed on partition removal / partition name change
 	- OK
 3) "priority_p_set" calls inside slurmctld_lock_t (write jobs)
 	- OK
-4) 
+4) job_update triggers a call to "priority_p_set"
+	- OK
+5) time limit of running jobs cannot be increased
+	- TODO
+
 
