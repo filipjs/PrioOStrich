@@ -15,3 +15,8 @@ Required SLURM support (checked as of 14.03):
 	- TODO
 
 
+
+
+TODO:
+- jesli nie ma enforce_part wtedy 'failed' prace sa wlaczane do kampani
+

@@ -91,6 +91,9 @@ static void _load_config(void);
 static void _update_struct(void);
 static void _my_sleep(int secs);
 
+static void _place_waiting_job(struct job_record *job_ptr, char *part_name);
+static void _manage_incoming_jobs(void);
+
 static void *_ostrich_agent(void *no_data);
 static void _stop_ostrich_agent(void);
 
@@ -290,30 +293,129 @@ static void _my_sleep(int secs)
 	pthread_mutex_unlock(&term_lock);
 }
 
+
+/* _place_waiting_job - put the job to the owners waiting list in the specified partition */
+static void _place_waiting_job(struct job_record *job_ptr, char *part_name)
+{
+	struct ostrich_schedule *sched;
+	struct ostrich_user *user;
+
+	sched = _find_schedule(part_name);
+
+	xassert(sched != NULL);
+
+	//TODO TRZEBA JESZCZE DODOWAC FLAGE TO ID
+	//TODO SPRWADZIC CZY ASSOC MAJA ID!!!
+	//TODO I.. ASSOC MOZE BYC ZMIENIONY, TRZEBA TO SPRAWDZAC DLA KAZDEJ PRACY
+	//TODO CZY POTRZEBNE SA ASSOC LOCKI???
+	//TODO job_ptr->assoc_id
+	//TODO job_ptr->assoc_ptr->usage->shares_norm
+	//TODO I BEDZIE TRZEBA UPDATOWAC SHARES_NORM PRZY KAZDEJ ITERACJI PODCZAS SPRAWDZANIA
+	user = list_find_first(sched->users,
+			       (ListFindF) _list_find_user,
+			       &(job_ptr->user_id));
+
+	if (!user) {
+		user = xmalloc(sizeof(struct ostrich_user));
+
+		user->user_id = job_ptr->user_id;
+
+		user->active_campaigns = 0;
+		user->last_campaign_id = 0;
+
+		user->virtual_time = 0;
+		user->shares = 1;
+		//TODO retrieve share count from an outside source (slurmdb?)
+
+		user->campaigns = list_create( (ListDelF) _list_delete_campaign );
+		user->waiting_jobs = list_create(NULL); /* job pointers, no delete function */
+
+		list_append(sched->users, user);
+	}
+
+	list_append(user->waiting_jobs, job_ptr);
+}
+
+/* _manage_incoming_jobs - move the newly submitted jobs to the appropriate schedules */
+static void _manage_incoming_jobs(void)
+{
+	struct part_record *part_ptr;
+	struct job_record *job_ptr;
+	ListIterator iter;
+
+	while ((job_ptr = (struct job_record *) list_dequeue(incoming_jobs))) {
+		if (job_ptr->part_ptr_list) {
+			iter = list_iterator_create(job_ptr->part_ptr_list);
+			while ((part_ptr = (struct part_record *) list_next(iter)))
+				_place_waiting_job(job_ptr, part_ptr->name);
+			list_iterator_destroy(iter);
+		} else if (job_ptr->part_ptr) {
+			_place_waiting_job(job_ptr, job_ptr->part_ptr->name);
+		} else {
+			error("OStrich: skipping job %d, no partition specified",
+			       job_ptr->job_id);
+		}
+	}
+}
+
+
 static void *_ostrich_agent(void *no_data)
 {
-	// TODO LOCKS
+	struct ostrich_schedule *sched;
+	ListIterator iter;
+	uint32_t prev_allocated;
+	double time_share;
+	DEF_TIMERS;
+
+	/* Read config, and partitions; Write jobs. */
+	slurmctld_lock_t all_locks = {
+		READ_LOCK, WRITE_LOCK, NO_LOCK, READ_LOCK };
 
 	/* Create empty lists. */
 	ostrich_sched_list = list_create( (ListDelF) _list_delete_schedule );
 	incoming_jobs = list_create(NULL); /* job pointers, no delete function */
 
+	/* Read settings. */
 	_load_config();
-	_update_struct();
+
+	last_sched_time = time(NULL);
 
 	while (!stop_thread) {
-		debug("SLEEPING");
 		_my_sleep(schedule_interval);
 
-		struct ostrich_schedule *sched;
-		ListIterator iter;
+		if (stop_thread)
+			break;
+		
+		lock_slurmctld(all_locks);
 
+		START_TIMER;
+
+		if (config_flag) {
+			config_flag = false;
+			_load_config();
+		}
+
+		_update_struct();
+		_manage_incoming_jobs();
+
+// 			has_resv1 = (job_rec1->job_ptr->resv_id != 0); TODO
+		
 		iter = list_iterator_create(ostrich_sched_list);
 		while ((sched = (struct ostrich_schedule *) list_next(iter))) {
 			debug("SCHED %s %d %d", sched->part_name, sched->priority, sched->max_time);
 		}
+		
+		
+		END_TIMER2("OStrich: ostrich_agent");
+		debug2("OStrich: schedule iteration %s", TIME_STR);
 	}
-	debug("OSTRICH THREAD ENDED");
+
+	debug("OSTRICH THREAD ENDED"); // TODO DELETE
+	/* Cleanup. */
+	list_destroy(ostrich_sched_list);
+	list_destroy(incoming_jobs);
+
+	return NULL;
 }
 
 static void _stop_ostrich_agent(void)
@@ -376,7 +478,7 @@ extern uint32_t priority_p_set(uint32_t last_prio, struct job_record *job_ptr)
 	// NOTE: must be called while holding slurmctld_lock_t
 	if (job_ptr->direct_set_prio)
 		return job_ptr->priority;
-	//TODO DODAC TUTAJ TEZ OD RAZU REZERWACJE??
+	//TODO DODAC TUTAJ TEZ OD RAZU REZERWACJE
 	//TODO JAK SIE PRACA ZMIENI TO PO PORSTU WYWOLANE BEDZIE JESZCZE RAZ
 	list_enqueue(incoming_jobs, job_ptr);
 	return 1;
@@ -384,6 +486,7 @@ extern uint32_t priority_p_set(uint32_t last_prio, struct job_record *job_ptr)
 
 extern void priority_p_reconfig(bool assoc_clear)
 {
+	// TODO FIXME TO NIE JEST POD SLURM LOCKIEM, ALBO NAPRAWIC ALBO DODAC WLASNY LOCK!!
 	config_flag = true;
 	return;
 }
