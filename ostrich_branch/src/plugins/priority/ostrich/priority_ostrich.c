@@ -14,6 +14,11 @@
 #define DEFAULT_PART_LIMIT 60 * 24 * 7
 #define DEFAULT_JOB_LIMIT  60 * 24 * 7 * 365
 
+/* Mode flags */
+#define MODE_FLAG_ONLY_ASSOC 	0x00000000 /* use only associations */
+#define MODE_FLAG_NO_ASSOC 	0x00000001 /* do not use associations */
+#define MODE_FLAG_MIXED		0x00000002 /* use associations if present */
+
 /* User type flags */
 #define TYPE_FLAG_NORMAL 0x00000001 /* normal user */
 #define TYPE_FLAG_ASSOC  0x00000002 /* account association */
@@ -46,7 +51,7 @@ struct ostrich_user {
 	uint32_t last_camp_id;		/* ID of the most recent campaign */
 
 	double virtual_pool;		/* accumulated time from the virtual schedule */
-	double time_share;		/* amount of time to assign to the user */
+	double time_share;		/* normalized share */
 
 	List campaigns;
 	List waiting_jobs;
@@ -58,9 +63,14 @@ struct ostrich_schedule {		/* one virtual schedule per partition */
 	uint32_t max_time;		/* maximum time for jobs in the partition */
 	uint32_t cpus_pn;		/* average number of cpus per node in the partition */
 
-	double total_shares;		/* total number of time shares from active users */
+	double total_shares;		/* sum of shares from active users */
 
 	List users;
+};
+
+struct user_key {
+	uint32_t user_id;
+	uint32_t user_type;
 };
 
 /*********************** local variables **********************/
@@ -75,6 +85,7 @@ static pthread_cond_t  term_cond = PTHREAD_COND_INITIALIZER;
 
 static uint32_t schedule_interval = INTERVAL;
 static uint32_t threshold = THRESHOLD;
+static uint32_t mode = MODE_FLAG_ONLY_ASSOC;
 
 static List ostrich_sched_list;	/* list of ostrich_schedule entries */
 static List incoming_jobs;		/* list of jobs entering the system */
@@ -110,6 +121,11 @@ static struct ostrich_schedule *_find_schedule(char *name)
 			       name);
 }
 
+static int _list_find_user(struct ostrich_user *user, struct user_key *key)
+{
+	return (user->id == key->user_id && user->type_flag == key->user_type);
+}
+
 static void _list_delete_schedule(struct ostrich_schedule *sched)
 {
 	xassert (sched != NULL);
@@ -126,6 +142,14 @@ static void _list_delete_user(struct ostrich_user *user)
 	list_destroy(user->campaigns);
 	list_destroy(user->waiting_jobs);
 	xfree(user);
+}
+
+static void _list_delete_campaign(struct ostrich_campaign *camp)
+{
+	xassert (camp != NULL);
+
+	list_destroy(camp->jobs);
+	xfree(camp);
 }
 
 /*********************** implementation ***********************/
@@ -172,22 +196,28 @@ static void _load_config(void)
 			schedule_interval = atoi(tmp_ptr + 9);
 		if (prio_params && (tmp_ptr=strstr(prio_params, "threshold=")))
 			threshold = atoi(tmp_ptr + 10) * 60;
+		if (prio_params && (tmp_ptr=strstr(prio_params, "mode=")))
+			mode = atoi(tmp_ptr + 5);
 
 		xfree(prio_params);
 	} else {
-		// 'fix' in versions without 'PriorityParameters'
+		// 'fix' in older versions without 'PriorityParameters'
 		// calc_period is in minutes, we need seconds for interval
 		schedule_interval = slurm_get_priority_calc_period() / 60;
 		threshold = slurm_get_priority_decay_hl();
+		mode = MODE_FLAG_NO_ASSOC;
 	}
 
 	if (schedule_interval < 1)
 		fatal("OStrich: invalid interval: %d", schedule_interval);
 	if (threshold < 60)
 		fatal("OStrich: invalid threshold: %d", threshold);
+	if (mode > 2)
+		fatal("OStrich: invalid mode: %d", mode);
 
 	info("OStrich: Interval is %u", schedule_interval);
 	info("OStrich: Threshold is %u", threshold);
+	info("OStrich: Mode is %u", mode);
 
 // TODO
 // 	if (slurm_get_priority_favor_small())
@@ -274,9 +304,9 @@ static void _update_struct(void)
 			sched->max_time = part_ptr->max_time;
 		/* Set/update average cpu count. */
 		if (part_ptr->total_nodes >= part_ptr->total_cpus)
-			sched->cpus_per_node = 1;
+			sched->cpus_pn = 1;
 		else
-			sched->cpus_per_node = part_ptr->total_cpus / part_ptr->total_nodes;
+			sched->cpus_pn = part_ptr->total_cpus / part_ptr->total_nodes;
 	}
 
 	list_iterator_destroy(iter);
@@ -299,33 +329,52 @@ static void _place_waiting_job(struct job_record *job_ptr, char *part_name)
 {
 	struct ostrich_schedule *sched;
 	struct ostrich_user *user;
+	struct user_key key;
 
 	sched = _find_schedule(part_name);
 
 	xassert(sched != NULL);
 
-	//TODO TRZEBA JESZCZE DODOWAC FLAGE TO ID
-	//TODO SPRWADZIC CZY ASSOC MAJA ID!!!
-	//TODO I.. ASSOC MOZE BYC ZMIENIONY, TRZEBA TO SPRAWDZAC DLA KAZDEJ PRACY
-	//TODO CZY POTRZEBNE SA ASSOC LOCKI???
-	//TODO job_ptr->assoc_id
-	//TODO job_ptr->assoc_ptr->usage->shares_norm
-	//TODO I BEDZIE TRZEBA UPDATOWAC SHARES_NORM PRZY KAZDEJ ITERACJI PODCZAS SPRAWDZANIA
+	if (mode == MODE_FLAG_ONLY_ASSOC) {
+		if (job_ptr->assoc_ptr) {
+			key.user_id = job_ptr->assoc_id;
+			key.user_type = TYPE_FLAG_ASSOC;
+		} else {
+			error("OStrich: skipping job %d, no account association",
+			      job_ptr->job_id);
+			// TODO JOB_PRIO = 0 I JAKIS REASON??
+			return;
+		}
+	} else if (mode == MODE_FLAG_NO_ASSOC) {
+		key.user_id = job_ptr->user_id;
+		key.user_type = TYPE_FLAG_NORMAL;
+	} else {	// mixed mode
+		if (job_ptr->assoc_ptr) {
+			key.user_id = job_ptr->assoc_id;
+			key.user_type = TYPE_FLAG_ASSOC;
+		} else {
+			key.user_id = job_ptr->user_id;
+			key.user_type = TYPE_FLAG_NORMAL;
+			debug("OStrich: mixed mode, job %d without association",
+			      job_ptr->job_id);
+		}
+	}
+
 	user = list_find_first(sched->users,
 			       (ListFindF) _list_find_user,
-			       &(job_ptr->user_id));
+			       &key);
 
 	if (!user) {
 		user = xmalloc(sizeof(struct ostrich_user));
 
-		user->user_id = job_ptr->user_id;
+		user->id = key.user_id;
+		user->type_flag = key.user_type;
 
 		user->active_campaigns = 0;
-		user->last_campaign_id = 0;
+		user->last_camp_id = 0;
 
-		user->virtual_time = 0;
-		user->shares = 1;
-		//TODO retrieve share count from an outside source (slurmdb?)
+		user->virtual_pool = 0;
+		user->time_share = 0;
 
 		user->campaigns = list_create( (ListDelF) _list_delete_campaign );
 		user->waiting_jobs = list_create(NULL); /* job pointers, no delete function */
@@ -353,7 +402,8 @@ static void _manage_incoming_jobs(void)
 			_place_waiting_job(job_ptr, job_ptr->part_ptr->name);
 		} else {
 			error("OStrich: skipping job %d, no partition specified",
-			       job_ptr->job_id);
+			      job_ptr->job_id);
+			// TODO JOB_PRIO = 0 I JAKIS REASON??
 		}
 	}
 }
@@ -398,6 +448,12 @@ static void *_ostrich_agent(void *no_data)
 		_update_struct();
 		_manage_incoming_jobs();
 
+	//TODO I.. ASSOC MOZE BYC ZMIENIONY, TRZEBA TO SPRAWDZAC DLA KAZDEJ PRACY
+	//TODO CZY POTRZEBNE SA ASSOC LOCKI???
+	//TODO job_ptr->assoc_id
+	//TODO job_ptr->assoc_ptr->usage->shares_norm
+	//TODO I BEDZIE TRZEBA UPDATOWAC SHARES_NORM PRZY KAZDEJ ITERACJI PODCZAS SPRAWDZANIA
+
 // 			has_resv1 = (job_rec1->job_ptr->resv_id != 0); TODO
 		
 		iter = list_iterator_create(ostrich_sched_list);
@@ -405,7 +461,8 @@ static void *_ostrich_agent(void *no_data)
 			debug("SCHED %s %d %d", sched->part_name, sched->priority, sched->max_time);
 		}
 		
-		
+		//TODO USUWANIE OSTRICH_USER JESLI INACTIVE PRZEZ DLUGI CZAS???
+
 		END_TIMER2("OStrich: ostrich_agent");
 		debug2("OStrich: schedule iteration %s", TIME_STR);
 	}
