@@ -20,3 +20,4 @@ Required SLURM support (checked as of 14.03):
 TODO:
 - jesli nie ma enforce_part wtedy 'failed' prace sa wlaczane do kampani
 
+- job update bedzie ustawial prio na 0/1.. nie zmieniac prio po updacie??
