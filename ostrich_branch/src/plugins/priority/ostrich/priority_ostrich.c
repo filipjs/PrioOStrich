@@ -39,7 +39,7 @@ struct ostrich_campaign {
 	uint32_t remaining_time;	/* total time of still active jobs in the campaign */
 	double virtual_time;		/* time assigned from the user's virtual time pool */
 
-	time_t creation_time;
+	time_t accept_point;		/* campaign threshold for accepting new jobs */
 	List jobs;
 };
 
@@ -63,7 +63,7 @@ struct ostrich_schedule {		/* one virtual schedule per partition */
 	uint32_t max_time;		/* maximum time for jobs in the partition */
 	uint32_t cpus_pn;		/* average number of cpus per node in the partition */
 
-	uint32_t allocated_cpus;	/* number of cpus that are currently allocated to jobs */
+	uint32_t working_cpus;		/* number of cpus that are currently allocated to jobs */
 	double total_shares;		/* sum of shares from active users */
 
 	List users;
@@ -95,12 +95,12 @@ static time_t last_sched_time;		/* time of last scheduling pass */
 
 /*********************** local functions **********************/
 static struct ostrich_schedule *_find_schedule(char *name);
+static uint32_t _job_pred_runtime(struct job_record *job_ptr);
+static uint32_t _job_real_runtime(struct job_record *job_ptr);
 static uint32_t (*_job_resources)(struct job_record *job_ptr);
 static uint32_t _serial_resources(struct job_record *job_ptr);
 static uint32_t _linear_resources(struct job_record *job_ptr);
 static uint32_t _cons_resources(struct job_record *job_ptr);
-static int _proper_campaign(struct job_record *job_ptr,
-			     struct ostrich_campaign *camp);
 
 static void _load_config(void);
 static void _update_struct(void);
@@ -110,6 +110,8 @@ static void _place_waiting_job(struct job_record *job_ptr, char *part_name);
 static void _manage_incoming_jobs(void);
 static int _manage_waiting_jobs(struct ostrich_user *user,
 				 struct ostrich_schedule *sched);
+static int _update_camp_workload(struct ostrich_user *user,
+				  struct ostrich_schedule *sched);
 static void *_ostrich_agent(void *no_data);
 static void _stop_ostrich_agent(void);
 
@@ -176,6 +178,36 @@ static struct ostrich_schedule *_find_schedule(char *name)
 			       name);
 }
 
+/* _job_pred_runtime - return job time limit in seconds
+ *	or DEFAULT_JOB_LIMIT if not set */
+static uint32_t _job_pred_runtime(struct job_record *job_ptr)
+{
+	/* All values are in minutes, change to seconds. */
+	if (job_ptr->time_limit == NO_VAL || job_ptr->time_limit == INFINITE)
+		return DEFAULT_JOB_LIMIT * 60;
+	return job_ptr->time_limit * 60;
+}
+
+/* _job_real_runtime - calculate the job run time depending on its state */
+static uint32_t _job_real_runtime(struct job_record *job_ptr)
+{
+	time_t end;
+
+	if (IS_JOB_FINISHED(job_ptr))
+		end = job_ptr->end_time;
+	else if (IS_JOB_SUSPENDED(job_ptr))
+		end = job_ptr->suspend_time;
+	else if (IS_JOB_RUNNING(job_ptr))
+		end = time(NULL);
+	else
+		return 0; /* pending */
+
+	if (end > job_ptr->start_time + job_ptr->tot_sus_time)
+		return end - job_ptr->start_time - job_ptr->tot_sus_time;
+	else
+		return 0;
+}
+
 /* _***_resources - calculate the number of cpus used by the job */
 static uint32_t _serial_resources(struct job_record *job_ptr)
 {
@@ -201,12 +233,6 @@ static uint32_t _cons_resources(struct job_record *job_ptr)
 		return job_ptr->details->cpus_per_task;
 }
 
-/* _proper_campaign - check if the job belongs to the campaign */
-static int _proper_campaign(struct job_record *job_ptr,
-			     struct ostrich_campaign *camp)
-{
-	return (job_ptr->details->begin_time <= camp->creation_time + threshold);
-}
 
 static void _load_config(void)
 {
@@ -316,7 +342,7 @@ static void _update_struct(void)
 		if (!sched) {
 			sched = xmalloc(sizeof(struct ostrich_schedule));
 			sched->part_name = xstrdup(part_ptr->name);
-			sched->allocated_cpus = 0;
+			sched->working_cpus = 0;
 			sched->total_shares = 0;
 
 			sched->users = list_create( (ListDelF) _list_delete_user );
@@ -476,7 +502,7 @@ static int _manage_waiting_jobs(struct ostrich_user *user,
 			camp->remaining_time = 0;
 			camp->virtual_time = 0;
 
-			camp->creation_time = job_ptr->details->begin_time;
+			camp->accept_point = job_ptr->details->begin_time + threshold;
 			camp->jobs = list_create(NULL); /* job pointers, no delete function */
 
 			list_append(user->campaigns, camp);
@@ -484,7 +510,7 @@ static int _manage_waiting_jobs(struct ostrich_user *user,
 			 * and now we cannot continue to use 'camp_iter'. */
 			orig_list_ended = true;
 		}
-		if (_proper_campaign(job_ptr, camp)) {
+		if (job_ptr->details->begin_time < camp->accept_point) {
 			/* Look for duplicates in the campaign. */
 			dup = list_find_first(camp->jobs,
 					      (ListFindF) _list_find_job,
@@ -502,40 +528,59 @@ static int _manage_waiting_jobs(struct ostrich_user *user,
 			camp = NULL;
 		}
 	}
-
+	/* Note: if a remaining job from the waiting list is updated,
+	 * it will be re-introduced to the system.
+	 */
 	list_iterator_destroy(camp_iter);
 	list_iterator_destroy(job_iter);
-
 	return 0;
 }
 
-// 	/* Check the boundaries of all the jobs in the campaigns.
+//TODO OPIS
+//* Check the boundaries of all the jobs in the campaigns.
 // 	 * Calculate the number of allocated cpus in this partition. */
-// 	camp_iter = list_iterator_create(user->campaigns);
-// 
-// 	while ((camp = (struct ostrich_campaign *) list_next(camp_iter))) {
-// 
-// 		camp->remaining_time = 0;
-// 		job_iter = list_iterator_create(camp->jobs);
-// 
-// 		while ((job_ptr = (struct job_record *) list_next(job_iter))) {
-// 
-// 			job_cpus = _job_resources(job_ptr);
-// 			job_runtime = _job_real_runtime(job_ptr);
-// 			job_time_limit = MIN(_job_pred_runtime(job_ptr),
-// 					     sched->max_time);
-// 			/* Remove finished jobs. */
-// 			if (IS_JOB_FINISHED(job_ptr)) {
-// 				/* Use real time. */
-// 				camp->completed_time += job_runtime * job_cpus;
-// 
+static int _update_camp_workload(struct ostrich_user *user,
+				 struct ostrich_schedule *sched)
+{
+	struct ostrich_campaign *camp;
+	struct job_record *job_ptr;
+	ListIterator camp_iter, job_iter;
+	time_t now = time(NULL);
+	uint32_t job_cpus, job_runtime, job_time_limit;
+
+	camp_iter = list_iterator_create(user->campaigns);
+
+	while ((camp = (struct ostrich_campaign *) list_next(camp_iter))) {
+
+		camp->remaining_time = 0;
+		job_iter = list_iterator_create(camp->jobs);
+
+		while ((job_ptr = (struct job_record *) list_next(job_iter))) {
+
+			job_cpus = _job_resources(job_ptr);
+			job_runtime = _job_real_runtime(job_ptr);
+			job_time_limit = MIN(_job_pred_runtime(job_ptr),
+					     sched->max_time);
+			/* Remove finished jobs. */
+			if (IS_JOB_FINISHED(job_ptr)) {
+				/* Use real time. */
+				camp->completed_time += job_runtime * job_cpus;
+
+// TODO
 // 				if (DEBUG_FLAG)
 // 					_print_finished_job(job_ptr, camp->camp_id);
-// 
-// 				list_remove(job_iter);
-// 				continue;
-// 			}
-// 			/* Check job boundaries. */
+ 
+				list_remove(job_iter);
+				continue;
+			}
+			/* Validate the job */
+//TODO FIXME
+	//TODO I.. ASSOC MOZE BYC ZMIENIONY, TRZEBA TO SPRAWDZAC DLA KAZDEJ PRACY
+	//TODO CZY POTRZEBNE SA ASSOC LOCKI???
+	//TODO job_ptr->assoc_id
+	//TODO job_ptr->assoc_ptr->usage->shares_norm
+	//TODO I BEDZIE TRZEBA UPDATOWAC SHARES_NORM PRZY KAZDEJ ITERACJI PODCZAS SPRAWDZANIA
+
 // 			if (_is_priority_job(job_ptr) ||
 // 			    !_is_in_partition(job_ptr, sched) ||
 // 			    !_is_in_campaign(job_ptr, camp) ||
@@ -544,27 +589,28 @@ static int _manage_waiting_jobs(struct ostrich_user *user,
 // 				list_remove(job_iter);
 // 				continue;
 // 			}
-// 			/* Job belongs to the campaign, process it further. */
-// 			if (IS_JOB_SUSPENDED(job_ptr)) {
-// 				/* Use real time. */
-// 				camp->remaining_time += job_runtime * job_cpus;
-// 			} else if (IS_JOB_RUNNING(job_ptr)) {
-// 				/* Count allocated resources only if the job is running. */
-// 				sched->allocated_cpus += job_cpus;
-// 				/* Use prediction. */
-// 				camp->remaining_time += job_time_limit * job_cpus;
-// 			} else  {
-// 				/* Job is pending, use prediction. */
-// 				camp->remaining_time += job_time_limit * job_cpus;
-// 			}
-// 		}
-// 
-// 		list_iterator_destroy(job_iter);
-// 	}
-// 
-// 	list_iterator_destroy(camp_iter);
-// 	return 0;
-// }
+
+			/* Job belongs to the campaign, process it further. */
+			if (IS_JOB_SUSPENDED(job_ptr)) {
+				/* Use real time. */
+				camp->remaining_time += job_runtime * job_cpus;
+			} else if (IS_JOB_RUNNING(job_ptr)) {
+				/* Use predicted time. */
+				camp->remaining_time += job_time_limit * job_cpus;
+				/* Add the resources only if the job is running. */
+				sched->working_cpus += job_cpus;
+			} else  {
+				/* Job is pending, use prediction. */
+				camp->remaining_time += job_time_limit * job_cpus;
+			}
+		}
+
+		list_iterator_destroy(job_iter);
+	}
+
+	list_iterator_destroy(camp_iter);
+	return 0;
+}
 
 
 static void *_ostrich_agent(void *no_data)
@@ -612,20 +658,21 @@ static void *_ostrich_agent(void *no_data)
 		iter = list_iterator_create(ostrich_sched_list);
 		
 		while ((sched = (struct ostrich_schedule *) list_next(iter))) {
-			
+
 			list_for_each(sched->users,
 				      (ListForF) _manage_waiting_jobs,
 				      sched);
 			
-			prev_allocated = sched->allocated_cpus;
-			sched->allocated_cpus = 0;
+			prev_allocated = sched->working_cpus;
+			sched->working_cpus = 0;
+			
+			list_for_each(sched->users,
+				      (ListForF) _update_camp_workload,
+				      sched);
 		}
+
 		
-	//TODO I.. ASSOC MOZE BYC ZMIENIONY, TRZEBA TO SPRAWDZAC DLA KAZDEJ PRACY
-	//TODO CZY POTRZEBNE SA ASSOC LOCKI???
-	//TODO job_ptr->assoc_id
-	//TODO job_ptr->assoc_ptr->usage->shares_norm
-	//TODO I BEDZIE TRZEBA UPDATOWAC SHARES_NORM PRZY KAZDEJ ITERACJI PODCZAS SPRAWDZANIA
+		
 		
 		iter = list_iterator_create(ostrich_sched_list);
 		while ((sched = (struct ostrich_schedule *) list_next(iter))) {
@@ -642,7 +689,6 @@ static void *_ostrich_agent(void *no_data)
 	/* Cleanup. */
 	list_destroy(ostrich_sched_list);
 	list_destroy(incoming_jobs);
-
 	return NULL;
 }
 
