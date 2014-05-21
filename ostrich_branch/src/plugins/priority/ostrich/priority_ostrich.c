@@ -14,6 +14,8 @@
 #define DEFAULT_PART_LIMIT 60 * 24 * 7
 #define DEFAULT_JOB_LIMIT  60 * 24 * 7 * 365
 
+#define DEFAULT_NORM_SHARE 0.01
+
 /* Mode flags */
 #define MODE_FLAG_ONLY_ASSOC 0x00000000 /* use only associations */
 #define MODE_FLAG_NO_ASSOC   0x00000001 /* do not use associations */
@@ -117,6 +119,8 @@ static int _manage_waiting_jobs(struct ostrich_user *user,
 static int _update_camp_workload(struct ostrich_user *user,
 				  struct ostrich_schedule *sched);
 static int _distribute_time(struct ostrich_user *user, double *time_tick);
+static int _update_user_activity(struct ostrich_user *user,
+				  struct ostrich_schedule *sched);
 
 static void *_ostrich_agent(void *no_data);
 static void _stop_ostrich_agent(void);
@@ -486,6 +490,13 @@ static void _place_waiting_job(struct job_record *job_ptr, char *part_name)
 		list_append(sched->users, user);
 	}
 
+	/* Set/update normalized share. */
+	if (user->type_flag == TYPE_FLAG_ASSOC)
+		user->norm_share = job_ptr->assoc_ptr->usage->shares_norm;
+		//TODO CZY TO MOZE BYC ZERO?? MOZE JEDNAK USTAWIC JAKIES DEFAULTOWE MINIMUM??
+	else
+		user->norm_share = DEFAULT_NORM_SHARE;
+
 	list_append(user->waiting_jobs, job_ptr);
 }
 
@@ -661,6 +672,20 @@ static int _distribute_time(struct ostrich_user *user, double *time_tick)
 	return 0;
 }
 
+//TODO OPIS FIXME
+/* _check_user_activity - further processing of the user on the given partition.
+ *	4) Redistribute virtual time between campaigns so that earlier created
+ *	campaigns finish first in the virtual schedule.
+ *	5) Count shares of active users.
+ */
+static int _update_user_activity(struct ostrich_user *user,
+				  struct ostrich_schedule *sched)
+{
+
+	return 0;
+
+}
+
 
 static void *_ostrich_agent(void *no_data)
 {
@@ -730,9 +755,13 @@ static void *_ostrich_agent(void *no_data)
 					      &time_skipped);
 			}
 
-	//TODO job_ptr->assoc_ptr->usage->shares_norm
-	//TODO I BEDZIE TRZEBA UPDATOWAC SHARES_NORM PRZY KAZDEJ ITERACJI PODCZAS SPRAWDZANIA
-
+			sched->total_shares = 0;
+			
+			list_for_each(sched->users,
+				      (ListForF) _update_user_activity,
+				      sched);
+			
+			//TODO ASSIGN PRIO
 		}
 
 		
