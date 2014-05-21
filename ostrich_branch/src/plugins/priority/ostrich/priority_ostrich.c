@@ -51,7 +51,7 @@ struct ostrich_user {
 	uint32_t last_camp_id;		/* ID of the most recent campaign */
 
 	double virtual_pool;		/* accumulated time from the virtual schedule */
-	double time_share;		/* normalized share */
+	double norm_share;		/* normalized share */
 
 	List campaigns;
 	List waiting_jobs;
@@ -116,6 +116,8 @@ static int _manage_waiting_jobs(struct ostrich_user *user,
 				 struct ostrich_schedule *sched);
 static int _update_camp_workload(struct ostrich_user *user,
 				  struct ostrich_schedule *sched);
+static int _distribute_time(struct ostrich_user *user, double *time_tick);
+
 static void *_ostrich_agent(void *no_data);
 static void _stop_ostrich_agent(void);
 
@@ -476,7 +478,7 @@ static void _place_waiting_job(struct job_record *job_ptr, char *part_name)
 		user->last_camp_id = 0;
 
 		user->virtual_pool = 0;
-		user->time_share = 0;
+		user->norm_share = 0;
 
 		user->campaigns = list_create( (ListDelF) _list_delete_campaign );
 		user->waiting_jobs = list_create(NULL); /* job pointers, no delete function */
@@ -652,6 +654,13 @@ static int _update_camp_workload(struct ostrich_user *user,
 	return 0;
 }
 
+static int _distribute_time(struct ostrich_user *user, double *time_tick)
+{
+	if (user->active_campaigns)
+		user->virtual_pool += (*time_tick * user->norm_share);
+	return 0;
+}
+
 
 static void *_ostrich_agent(void *no_data)
 {
@@ -710,6 +719,17 @@ static void *_ostrich_agent(void *no_data)
 				      (ListForF) _update_camp_workload,
 				      sched);
 			
+			sched->working_cpus = MAX(sched->working_cpus, 1);
+
+			if (sched->total_shares > 0) {
+				time_skipped *= MAX(prev_allocated, sched->working_cpus);
+				time_skipped /= sched->total_shares;
+
+				list_for_each(sched->users,
+					      (ListForF) _distribute_time,
+					      &time_skipped);
+			}
+
 	//TODO job_ptr->assoc_ptr->usage->shares_norm
 	//TODO I BEDZIE TRZEBA UPDATOWAC SHARES_NORM PRZY KAZDEJ ITERACJI PODCZAS SPRAWDZANIA
 
