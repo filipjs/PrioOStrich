@@ -101,6 +101,10 @@ static uint32_t (*_job_resources)(struct job_record *job_ptr);
 static uint32_t _serial_resources(struct job_record *job_ptr);
 static uint32_t _linear_resources(struct job_record *job_ptr);
 static uint32_t _cons_resources(struct job_record *job_ptr);
+static int _is_job_modified(struct job_record *job_ptr,
+			    struct ostrich_campaign *camp,
+			    struct ostrich_user *user,
+			    struct ostrich_schedule *sched);
 
 static void _load_config(void);
 static void _update_struct(void);
@@ -231,6 +235,50 @@ static uint32_t _cons_resources(struct job_record *job_ptr)
 		/* pending, give an estimate */
 		//TODO better estimate based on "select type"
 		return job_ptr->details->cpus_per_task;
+}
+
+/* _is_job_modified - check if the job was modified since the last iteration */
+static int _is_job_modified(struct job_record *job_ptr,
+			    struct ostrich_campaign *camp,
+			    struct ostrich_user *user,
+			    struct ostrich_schedule *sched)
+{
+	struct part_record *part_ptr;
+	ListIterator iter;
+	int found_part = 0;
+
+	/* Check privileges. */
+	if (job_ptr->direct_set_prio || job_ptr->resv_id)
+		return 1;
+
+	/* Check association. */
+	if (user->type_flag == TYPE_FLAG_ASSOC) {
+		if (!job_ptr->assoc_ptr || job_ptr->assoc_id != user->id)
+			return 1;
+	}
+
+	/* Check begin time. */
+	if (job_ptr->details->begin_time > time(NULL) ||
+		job_ptr->details->begin_time > camp->accept_point)
+		return 1;
+
+	/* Check partition. */
+	if (job_ptr->part_ptr_list) {
+		iter = list_iterator_create(job_ptr->part_ptr_list);
+		while ((part_ptr = (struct part_record *) list_next(iter)))
+			if (strcmp(part_ptr->name, sched->part_name) == 0) {
+				found_part = 1;
+				break;
+			}
+		list_iterator_destroy(iter);
+	} else if (job_ptr->part_ptr) {
+		found_part = (strcmp(job_ptr->part_ptr->name, sched->part_name) == 0);
+	}
+	if (!found_part)
+		return 1;
+
+	/* Not modified in a meaningful way. */
+	return 0;
 }
 
 
@@ -510,7 +558,7 @@ static int _manage_waiting_jobs(struct ostrich_user *user,
 			 * and now we cannot continue to use 'camp_iter'. */
 			orig_list_ended = true;
 		}
-		if (job_ptr->details->begin_time < camp->accept_point) {
+		if (job_ptr->details->begin_time <= camp->accept_point) {
 			/* Look for duplicates in the campaign. */
 			dup = list_find_first(camp->jobs,
 					      (ListFindF) _list_find_job,
@@ -529,7 +577,8 @@ static int _manage_waiting_jobs(struct ostrich_user *user,
 		}
 	}
 	/* Note: if a remaining job from the waiting list is updated,
-	 * it will be re-introduced to the system.
+	 * it will be re-introduced to the system. 
+	 * There is no need to validate it.
 	 */
 	list_iterator_destroy(camp_iter);
 	list_iterator_destroy(job_iter);
@@ -545,7 +594,6 @@ static int _update_camp_workload(struct ostrich_user *user,
 	struct ostrich_campaign *camp;
 	struct job_record *job_ptr;
 	ListIterator camp_iter, job_iter;
-	time_t now = time(NULL);
 	uint32_t job_cpus, job_runtime, job_time_limit;
 
 	camp_iter = list_iterator_create(user->campaigns);
@@ -574,21 +622,13 @@ static int _update_camp_workload(struct ostrich_user *user,
 				continue;
 			}
 			/* Validate the job */
-//TODO FIXME
-	//TODO I.. ASSOC MOZE BYC ZMIENIONY, TRZEBA TO SPRAWDZAC DLA KAZDEJ PRACY
-	//TODO CZY POTRZEBNE SA ASSOC LOCKI???
-	//TODO job_ptr->assoc_id
-	//TODO job_ptr->assoc_ptr->usage->shares_norm
-	//TODO I BEDZIE TRZEBA UPDATOWAC SHARES_NORM PRZY KAZDEJ ITERACJI PODCZAS SPRAWDZANIA
-
-// 			if (_is_priority_job(job_ptr) ||
-// 			    !_is_in_partition(job_ptr, sched) ||
-// 			    !_is_in_campaign(job_ptr, camp) ||
-// 			    (job_ptr->details->begin_time > now)) {
-// 				_move_to_incoming(job_ptr);
-// 				list_remove(job_iter);
-// 				continue;
-// 			}
+			if (_is_job_modified(job_ptr, camp, user, sched)) {
+				list_remove(job_iter);
+				continue;
+			}
+			/* Note: if a job is updated, it will be re-introduced to the system. 
+			* There is no need to manually put it back to 'incoming_jobs'.
+			*/
 
 			/* Job belongs to the campaign, process it further. */
 			if (IS_JOB_SUSPENDED(job_ptr)) {
@@ -600,7 +640,7 @@ static int _update_camp_workload(struct ostrich_user *user,
 				/* Add the resources only if the job is running. */
 				sched->working_cpus += job_cpus;
 			} else  {
-				/* Job is pending, use prediction. */
+				/* Job is pending, use predicted time. */
 				camp->remaining_time += job_time_limit * job_cpus;
 			}
 		}
@@ -669,6 +709,10 @@ static void *_ostrich_agent(void *no_data)
 			list_for_each(sched->users,
 				      (ListForF) _update_camp_workload,
 				      sched);
+			
+	//TODO job_ptr->assoc_ptr->usage->shares_norm
+	//TODO I BEDZIE TRZEBA UPDATOWAC SHARES_NORM PRZY KAZDEJ ITERACJI PODCZAS SPRAWDZANIA
+
 		}
 
 		
