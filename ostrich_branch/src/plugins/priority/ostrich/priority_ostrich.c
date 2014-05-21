@@ -107,6 +107,7 @@ static int _is_job_modified(struct job_record *job_ptr,
 			    struct ostrich_campaign *camp,
 			    struct ostrich_user *user,
 			    struct ostrich_schedule *sched);
+static uint32_t _campaign_time_left(struct ostrich_campaign *camp);
 
 static void _load_config(void);
 static void _update_struct(void);
@@ -287,6 +288,16 @@ static int _is_job_modified(struct job_record *job_ptr,
 	return 0;
 }
 
+/* _campaign_time_left - calculate the time needed for the campaign
+ *	to finish in the virtual schedule */
+static uint32_t _campaign_time_left(struct ostrich_campaign *camp)
+{
+	uint32_t workload = camp->completed_time + camp->remaining_time;
+	if (workload > (int) camp->virtual_time)
+		return workload - (int) camp->virtual_time;
+	return 0;
+}
+
 
 static void _load_config(void)
 {
@@ -435,6 +446,7 @@ static void _my_sleep(int secs)
 /* _place_waiting_job - put the job to the owners waiting list in the specified partition */
 static void _place_waiting_job(struct job_record *job_ptr, char *part_name)
 {
+	slurmdb_association_rec_t *assoc;
 	struct ostrich_schedule *sched;
 	struct ostrich_user *user;
 	struct user_key key;
@@ -491,10 +503,11 @@ static void _place_waiting_job(struct job_record *job_ptr, char *part_name)
 	}
 
 	/* Set/update normalized share. */
-	if (user->type_flag == TYPE_FLAG_ASSOC)
-		user->norm_share = job_ptr->assoc_ptr->usage->shares_norm;
+	if (user->type_flag == TYPE_FLAG_ASSOC) {
+		assoc = (slurmdb_association_rec_t *) job_ptr->assoc_ptr;
+		user->norm_share = assoc->usage->shares_norm;
 		//TODO CZY TO MOZE BYC ZERO?? MOZE JEDNAK USTAWIC JAKIES DEFAULTOWE MINIMUM??
-	else
+	} else
 		user->norm_share = DEFAULT_NORM_SHARE;
 
 	list_append(user->waiting_jobs, job_ptr);
@@ -681,9 +694,57 @@ static int _distribute_time(struct ostrich_user *user, double *time_tick)
 static int _update_user_activity(struct ostrich_user *user,
 				  struct ostrich_schedule *sched)
 {
+	struct ostrich_campaign *camp;
+	ListIterator iter;
+	double virt_time;
+	uint32_t workload, offset = 0;
 
+	user->active_campaigns = 0;
+	iter = list_iterator_create(user->campaigns);
+
+	/* Combine the virtual time from all campaigns. */
+	while ((camp = (struct ostrich_campaign *) list_next(iter))) {
+		user->virtual_pool  += camp->virtual_time;
+		camp->virtual_time = 0;
+	}
+
+	list_iterator_reset(iter);
+
+	/* Redistribute the virtual time by following the (default)
+	 * campaign ordering by creation time. */
+	while ((camp = (struct ostrich_campaign *) list_next(iter))) {
+		workload = camp->completed_time + camp->remaining_time;
+
+		virt_time = MIN((double) workload, user->virtual_pool);
+
+		camp->virtual_time += virt_time;
+		user->virtual_pool -= virt_time;
+
+		/* Offset is the total virtual time still
+		 * needed by the previous campaigns. */
+		camp->time_offset = offset;
+		offset += _campaign_time_left(camp);
+
+		if (_campaign_time_left(camp) == 0) {
+			/* Campaign ended in the virtual schedule. */
+			if (list_is_empty(camp->jobs) &&
+				time(NULL) > camp->accept_point)
+				/* It also ended in the real schedule. */
+				list_delete_item(iter);
+		} else {
+			/* Campaign is active. */
+			user->active_campaigns++;
+		}
+	}
+
+	list_iterator_destroy(iter);
+
+	if (user->active_campaigns)
+		sched->total_shares += user->norm_share;
+	/* The virtual time overflow is lost if not fully redistributed.
+	 * This is done to prevent potential abuses of the system. */
+	user->virtual_pool = 0;
 	return 0;
-
 }
 
 
