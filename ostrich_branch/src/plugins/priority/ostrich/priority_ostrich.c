@@ -89,6 +89,7 @@ static pthread_cond_t  term_cond = PTHREAD_COND_INITIALIZER;
 static uint32_t schedule_interval = INTERVAL;
 static uint32_t threshold = THRESHOLD;
 static uint32_t mode = MODE_FLAG_ONLY_ASSOC;
+static bool favor_small;
 
 static List ostrich_sched_list;	/* list of ostrich_schedule entries */
 static List incoming_jobs;		/* list of jobs entering the system */
@@ -122,6 +123,10 @@ static int _update_camp_workload(struct ostrich_user *user,
 static int _distribute_time(struct ostrich_user *user, double *time_tick);
 static int _update_user_activity(struct ostrich_user *user,
 				  struct ostrich_schedule *sched);
+static int _gather_campaigns(struct ostrich_user *user, List *l);
+static void _set_multi_prio(struct job_record *job_ptr, uint32_t prio,
+			    struct ostrich_schedule *sched);
+static void _assign_priorities(struct ostrich_schedule *sched);
 
 static void *_ostrich_agent(void *no_data);
 static void _stop_ostrich_agent(void);
@@ -174,6 +179,30 @@ static int _list_sort_job_begin_time(struct job_record *x,
 				      struct job_record *y)
 {
 	return (x->details->begin_time - y->details->begin_time);
+}
+
+/* Sort in ascending order of remaining campaign time,
+ * for equal elements sort in ascending order of creation time. */
+static int _list_sort_camp_remaining_time(struct ostrich_campaign *x,
+					  struct ostrich_campaign *y)
+{
+	int diff = ( (_campaign_time_left(x) + x->time_offset) -
+			(_campaign_time_left(y) + y->time_offset) );
+	if (diff == 0)
+		return (x->accept_point - y->accept_point);
+//TODO PO WPROWADZENIU SHARES TRZEBA JESZCZE LACZNY CZAS PODZIELIC PRZEZ USER->SHARES!!!!
+	return diff;
+}
+
+/* Sort in ascending order of job predicted runtime,
+ * for equal elements sort in ascending order of begin time. */
+static int _list_sort_job_runtime(struct job_record *x,
+				  struct job_record *y)
+{
+	int diff = _job_pred_runtime(x) - _job_pred_runtime(y);
+	if (diff == 0)
+		return _list_sort_job_begin_time(x, y);
+	return diff;
 }
 
 static int _list_remove_finished(struct job_record *job_ptr, void *no_data)
@@ -325,6 +354,7 @@ static void _load_config(void)
 		threshold = slurm_get_priority_decay_hl();
 		mode = MODE_FLAG_NO_ASSOC;
 	}
+	// TODO JESZCZE JEDEN IF DLA WERSJI < 2.6 I WTEDY NIE UZYWAC PRIORITY ARRAYS??
 
 	if (schedule_interval < 1)
 		fatal("OStrich: invalid interval: %d", schedule_interval);
@@ -333,15 +363,15 @@ static void _load_config(void)
 	if (mode > 2)
 		fatal("OStrich: invalid mode: %d", mode);
 
+	if (slurm_get_priority_favor_small())
+		favor_small = true;
+	else
+		favor_small = false;
+
 	info("OStrich: Interval is %u", schedule_interval);
 	info("OStrich: Threshold is %u", threshold);
 	info("OStrich: Mode is %u", mode);
-
-// TODO
-// 	if (slurm_get_priority_favor_small())
-// 		sort = sjb;
-// 	else
-// 		sort = fifo / longest job first??;
+	info("OStrich: Favor small %u", favor_small);
 
 	select_type = slurm_get_select_type();
 	if (strcmp(select_type, "select/serial") == 0)
@@ -747,6 +777,91 @@ static int _update_user_activity(struct ostrich_user *user,
 	return 0;
 }
 
+/* _gather_campaigns - merge campaigns into one common list */
+static int _gather_campaigns(struct ostrich_user *user, List *l)
+{
+	list_append_list(*l, user->campaigns);
+	return 0;
+}
+
+/* _set_multi_prio - set the priority of the job to 'prio'.
+ * Note: priority is set only for the given partition by using priority_array.
+ */
+static void _set_multi_prio(struct job_record *job_ptr, uint32_t prio,
+			    struct ostrich_schedule *sched)
+{
+	struct part_record *part_ptr;
+	ListIterator iter;
+	int inx = 0, size;
+
+	if (job_ptr->part_ptr_list) {
+		if (!job_ptr->priority_array) {
+			size = list_count(job_ptr->part_ptr_list) * sizeof(uint32_t);
+			job_ptr->priority_array = xmalloc(size);
+			/* If the partition count changes in the future,
+			 * the priority_array will be deallocated automatically
+			 * by SLURM in job_mgr.c 'update_job'.
+			 */
+		}
+		iter = list_iterator_create(job_ptr->part_ptr_list);
+		while ((part_ptr = (struct part_record *) list_next(iter))) {
+			if (strcmp(part_ptr->name, sched->part_name) == 0)
+				job_ptr->priority_array[inx] = prio;
+				/* Continue on with the loop, there might be
+				 *  multiple entries of the same partition. */
+			inx++;
+		}
+		list_iterator_destroy(iter);
+	}
+	if (job_ptr->part_ptr) {
+		if (strcmp(job_ptr->part_ptr->name, sched->part_name) == 0)
+			job_ptr->priority = prio;
+	}
+}
+
+/* _assign_priorities - set the priority for all the jobs in the partition. */
+static void _assign_priorities(struct ostrich_schedule *sched)
+{
+	struct ostrich_campaign *camp;
+	struct job_record *job_ptr;
+	List all_campaigns;
+	ListIterator camp_iter, job_iter;
+	int prio, normal_queue =  500000; /* Starting priority. */
+
+	all_campaigns = list_create(NULL); /* Tmp list, no delete function. */
+
+	list_for_each(sched->users,
+		      (ListForF) _gather_campaigns,
+		      &all_campaigns);
+
+	/* Sort the combined list of campaigns. */
+	list_sort(all_campaigns,
+		  (ListCmpF) _list_sort_camp_remaining_time);
+
+	camp_iter = list_iterator_create(all_campaigns);
+
+	while ((camp = (struct ostrich_campaign *) list_next(camp_iter))) {
+		
+		if (favor_small)
+			/* Sort the jobs inside each campaign. */
+			list_sort(camp->jobs,
+				  (ListCmpF) _list_sort_job_runtime);
+
+		job_iter = list_iterator_create(camp->jobs);
+		while ((job_ptr = (struct job_record *) list_next(job_iter))) {
+			/* Take into account partition priority. */
+			prio = normal_queue-- + sched->priority;
+			if (prio < 1)
+				prio = 1;
+			_set_multi_prio(job_ptr, prio, sched);
+		}
+		list_iterator_destroy(job_iter);
+	}
+
+	list_iterator_destroy(camp_iter);
+	list_destroy(all_campaigns);
+}
+
 
 static void *_ostrich_agent(void *no_data)
 {
@@ -822,18 +937,12 @@ static void *_ostrich_agent(void *no_data)
 				      (ListForF) _update_user_activity,
 				      sched);
 			
-			//TODO ASSIGN PRIO
+			_assign_priorities(sched);
 		}
 
-		
-		
-		
-		iter = list_iterator_create(ostrich_sched_list);
-		while ((sched = (struct ostrich_schedule *) list_next(iter))) {
-			debug("SCHED %s %d %d", sched->part_name, sched->priority, sched->max_time);
-		}
-		
+		list_iterator_destroy(iter);
 		//TODO USUWANIE OSTRICH_USER JESLI INACTIVE PRZEZ DLUGI CZAS???
+		unlock_slurmctld(all_locks);
 
 		END_TIMER2("OStrich: ostrich_agent");
 		debug2("OStrich: schedule iteration %s", TIME_STR);
