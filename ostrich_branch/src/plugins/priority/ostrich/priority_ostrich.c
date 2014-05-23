@@ -295,7 +295,7 @@ static int _is_job_modified(struct job_record *job_ptr,
 
 	/* Check begin time. */
 	if (job_ptr->details->begin_time > time(NULL) ||
-		job_ptr->details->begin_time > camp->accept_point)
+	    job_ptr->details->begin_time > camp->accept_point)
 		return 1;
 
 	/* Check partition. */
@@ -336,9 +336,9 @@ static void _load_config(void)
 // 	if (protocol_version >= SLURM_14_10_PROTOCOL_VERSION) // TODO FIXME
 	if (1) {
 		char *prio_params = slurm_get_priority_params();
-	
-		// from PriorityParameters: 
-		// interval is in seconds, threshold in minutes
+
+		/* from PriorityParameters:
+		 * interval is in seconds, threshold in minutes */
 		if (prio_params && (tmp_ptr=strstr(prio_params, "interval=")))
 			schedule_interval = atoi(tmp_ptr + 9);
 		if (prio_params && (tmp_ptr=strstr(prio_params, "threshold=")))
@@ -348,8 +348,8 @@ static void _load_config(void)
 
 		xfree(prio_params);
 	} else {
-		// 'fix' in older versions without 'PriorityParameters'
-		// calc_period is in minutes, we need seconds for interval
+		/* 'fix' in older versions without 'PriorityParameters'
+		 * calc_period is in minutes, we need seconds for interval */
 		schedule_interval = slurm_get_priority_calc_period() / 60;
 		threshold = slurm_get_priority_decay_hl();
 		mode = MODE_FLAG_NO_ASSOC;
@@ -372,6 +372,15 @@ static void _load_config(void)
 	info("OStrich: Threshold is %u", threshold);
 	info("OStrich: Mode is %u", mode);
 	info("OStrich: Favor small %u", favor_small);
+
+	if (mode == MODE_FLAG_ONLY_ASSOC) {
+		char *storage_type = slurm_get_accounting_storage_type();
+
+		if (strcasecmp(storage_type, "accounting_storage/slurmdbd") &&
+		    strcasecmp(storage_type, "accounting_storage/mysql"))
+			fatal("OStrich: Mode `associations only` requires slurmdbd "
+			      "or mysql accounting_storage plugin");
+	}
 
 	select_type = slurm_get_select_type();
 	if (strcmp(select_type, "select/serial") == 0)
@@ -1031,30 +1040,13 @@ extern void priority_p_reconfig(bool assoc_clear)
 
 extern void priority_p_set_assoc_usage(slurmdb_association_rec_t *assoc)
 {
-	// TODO DOUBLE CHECK JAKIE SA LOCKI, CZY POTRZEBA JEDNAK MUTEXA??
 	return;
 }
 
 extern double priority_p_calc_fs_factor(long double usage_efctv,
 					long double shares_norm)
 {
-	// TODO DOUBLE CHECK JAKIE SA LOCKI, CZY POTRZEBA JEDNAK MUTEXA??
-	return 1;
-
-	/* This calculation is needed for sshare when ran from a
-	 * non-multifactor machine to a multifactor machine.  It
-	 * doesn't do anything on regular systems, it should always
-	 * return 0 since shares_norm will always be NO_VAL. */
-// 	double priority_fs;
-//
-// 	xassert(!fuzzy_equal(usage_efctv, NO_VAL));
-//
-// 	if ((shares_norm <= 0.0) || fuzzy_equal(shares_norm, NO_VAL))
-// 		priority_fs = 0.0;
-// 	else
-// 		priority_fs = pow(2.0, -(usage_efctv / shares_norm));
-//
-// 	return priority_fs;
+	return 0;
 }
 
 extern List priority_p_get_priority_factors_list(
