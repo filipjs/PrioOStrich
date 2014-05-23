@@ -25,4 +25,5 @@ TODO:
 
 - sprwdzic overflow, szczegolnie przy TIME * CPUS i wszedzie gdzie jest DOUBLE
 
+- prio factors beda wskazywaly na losowa partycje - co z tym zrobic???
 

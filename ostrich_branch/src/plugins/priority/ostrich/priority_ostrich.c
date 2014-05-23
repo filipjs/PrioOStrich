@@ -798,7 +798,7 @@ static int _gather_campaigns(struct ostrich_user *user, List *l)
 }
 
 /* _set_multi_prio - set the priority of the job to 'prio'.
- * Note: priority is set only for the given partition by using priority_array.
+ * Note: priority is set only for the given partition by utilizing priority_array.
  */
 static void _set_multi_prio(struct job_record *job_ptr, uint32_t prio,
 			    struct ostrich_schedule *sched)
@@ -839,7 +839,7 @@ static void _assign_priorities(struct ostrich_schedule *sched)
 	struct job_record *job_ptr;
 	List all_campaigns;
 	ListIterator camp_iter, job_iter;
-	int prio, normal_queue =  500000; /* Starting priority. */
+	int prio, js_prio, fs_prio =  500000; /* Starting priority. */
 
 	all_campaigns = list_create(NULL); /* Tmp list, no delete function. */
 
@@ -860,12 +860,25 @@ static void _assign_priorities(struct ostrich_schedule *sched)
 			list_sort(camp->jobs,
 				  (ListCmpF) _list_sort_job_runtime);
 
+		fs_prio -= list_count(camp->jobs);
+		js_prio = 0;
+
 		job_iter = list_iterator_create(camp->jobs);
 		while ((job_ptr = (struct job_record *) list_next(job_iter))) {
-			/* Take into account partition priority. */
-			prio = normal_queue-- + sched->priority;
+
+			if (!job_ptr->prio_factors) {
+				job_ptr->prio_factors = xmalloc(sizeof(priority_factors_object_t));
+				memset(job_ptr->prio_factors, 0, sizeof(priority_factors_object_t));
+			}
+
+			job_ptr->prio_factors->priority_fs = fs_prio;
+			job_ptr->prio_factors->priority_js = ++js_prio;
+			job_ptr->prio_factors->priority_part = sched->priority;
+
+			prio = fs_prio + js_prio + sched->priority;
 			if (prio < 1)
 				prio = 1;
+
 			_set_multi_prio(job_ptr, prio, sched);
 		}
 		list_iterator_destroy(job_iter);
