@@ -32,17 +32,16 @@ const uint32_t plugin_version	= 100;
 
 
 /*********************** local structures *********************/
-struct ostrich_campaign {
-	uint32_t id;
-	uint32_t priority;
+struct ostrich_schedule {		/* one virtual schedule per partition */
+	char *part_name;		/* name of the partition */
+	uint16_t priority;		/* scheduling priority of the partition */
+	uint32_t max_time;		/* maximum time for jobs in the partition */
+	uint32_t cpus_pn;		/* average number of cpus per node in the partition */
 
-	uint32_t time_offset;		/* time needed to complete previous campaigns */
-	uint32_t completed_time;	/* total time of completed jobs in the campaign */
-	uint32_t remaining_time;	/* total time of still active jobs in the campaign */
-	double virtual_time;		/* time assigned from the user's virtual time pool */
+	uint32_t working_cpus;		/* number of cpus that are currently allocated to jobs */
+	double total_shares;		/* sum of shares from active users */
 
-	time_t accept_point;		/* campaign threshold for accepting new jobs */
-	List jobs;
+	List users;
 };
 
 struct ostrich_user {
@@ -59,16 +58,18 @@ struct ostrich_user {
 	List waiting_jobs;
 };
 
-struct ostrich_schedule {		/* one virtual schedule per partition */
-	char *part_name;		/* name of the partition */
-	uint16_t priority;		/* scheduling priority of the partition */
-	uint32_t max_time;		/* maximum time for jobs in the partition */
-	uint32_t cpus_pn;		/* average number of cpus per node in the partition */
+struct ostrich_campaign {
+	uint32_t id;
+	uint32_t priority;
+	struct ostrich_user *owner;
 
-	uint32_t working_cpus;		/* number of cpus that are currently allocated to jobs */
-	double total_shares;		/* sum of shares from active users */
+	uint32_t time_offset;		/* time needed to complete previous campaigns */
+	uint32_t completed_time;	/* total time of completed jobs in the campaign */
+	uint32_t remaining_time;	/* total time of still active jobs in the campaign */
+	double virtual_time;		/* time assigned from the user's virtual time pool */
 
-	List users;
+	time_t accept_point;		/* campaign threshold for accepting new jobs */
+	List jobs;
 };
 
 struct user_key {
@@ -186,12 +187,14 @@ static int _list_sort_job_begin_time(struct job_record *x,
 static int _list_sort_camp_remaining_time(struct ostrich_campaign *x,
 					  struct ostrich_campaign *y)
 {
-	int diff = ( (_campaign_time_left(x) + x->time_offset) -
-			(_campaign_time_left(y) + y->time_offset) );
-	if (diff == 0)
-		return (x->accept_point - y->accept_point);
-//TODO PO WPROWADZENIU SHARES TRZEBA JESZCZE LACZNY CZAS PODZIELIC PRZEZ USER->SHARES!!!!
-	return diff;
+	int64_t est_x = (_campaign_time_left(x) + x->time_offset) / x->owner->norm_share;
+	int64_t est_y = (_campaign_time_left(y) + y->time_offset) / y->owner->norm_share;
+	if (est_x - est_y == 0)
+		return x->accept_point - y->accept_point;
+	else if (est_x - est_y < 0)
+		return -1;
+	else
+		return 1;
 }
 
 /* Sort in ascending order of job predicted runtime,
@@ -609,6 +612,7 @@ static int _manage_waiting_jobs(struct ostrich_user *user,
 
 			camp->id = ++user->last_camp_id;
 			camp->priority = 0;
+			camp->owner = user;
 
 			camp->time_offset = 0;
 			camp->completed_time = 0;

@@ -22,3 +22,7 @@ TODO:
 - jesli nie ma enforce_part wtedy 'failed' prace sa wlaczane do kampani
 
 - job update bedzie ustawial prio na 0/1.. nie zmieniac prio po updacie??
+
+- sprwdzic overflow, szczegolnie przy TIME * CPUS i wszedzie gdzie jest DOUBLE
+
+
