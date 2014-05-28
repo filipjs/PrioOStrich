@@ -4,6 +4,7 @@
 #include "slurm/slurm_errno.h"
 
 #include "src/common/assoc_mgr.h"
+#include "src/common/list.h"
 #include "src/common/slurm_priority.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
@@ -18,8 +19,8 @@
 
 /* Mode flags */
 #define MODE_FLAG_ONLY_ASSOC 0x00000000 /* use only associations */
-#define MODE_FLAG_NO_ASSOC   0x00000001 /* do not use associations */
-#define MODE_FLAG_MIXED      0x00000002 /* use associations if present */
+#define MODE_FLAG_MIXED      0x00000001 /* use associations if present */
+#define MODE_FLAG_NO_ASSOC   0x00000002 /* do not use associations */
 
 /* User type flags */
 #define TYPE_FLAG_NORMAL 0x00000001 /* normal user */
@@ -176,19 +177,22 @@ static void _list_delete_campaign(struct ostrich_campaign *camp)
 
 /* Sort in ascending order of job begin time.
  * Can be used only on lists without finished jobs. */
-static int _list_sort_job_begin_time(struct job_record *x,
-				      struct job_record *y)
+static int _list_sort_job_begin_time(void *a, void *b)
 {
+	struct job_record *x = *(struct job_record **) a;
+	struct job_record *y = *(struct job_record **) b;
 	return (x->details->begin_time - y->details->begin_time);
 }
 
 /* Sort in ascending order of remaining campaign time,
  * for equal elements sort in ascending order of creation time. */
-static int _list_sort_camp_remaining_time(struct ostrich_campaign *x,
-					  struct ostrich_campaign *y)
+static int _list_sort_camp_remaining_time(void *a, void *b)
 {
+	struct ostrich_campaign *x = *(struct ostrich_campaign **) a;
+	struct ostrich_campaign *y = *(struct ostrich_campaign **) b;
 	int64_t est_x = (_campaign_time_left(x) + x->time_offset) / x->owner->norm_share;
 	int64_t est_y = (_campaign_time_left(y) + y->time_offset) / y->owner->norm_share;
+
 	if (est_x - est_y == 0)
 		return x->accept_point - y->accept_point;
 	else if (est_x - est_y < 0)
@@ -199,13 +203,16 @@ static int _list_sort_camp_remaining_time(struct ostrich_campaign *x,
 
 /* Sort in ascending order of job predicted runtime,
  * for equal elements sort in ascending order of begin time. */
-static int _list_sort_job_runtime(struct job_record *x,
-				  struct job_record *y)
+static int _list_sort_job_runtime(void *a, void *b)
 {
+	struct job_record *x = *(struct job_record **) a;
+	struct job_record *y = *(struct job_record **) b;
 	int diff = _job_pred_runtime(x) - _job_pred_runtime(y);
+
 	if (diff == 0)
 		return _list_sort_job_begin_time(x, y);
-	return diff;
+	else
+		return diff;
 }
 
 static int _list_remove_finished(struct job_record *job_ptr, void *no_data)
@@ -592,9 +599,10 @@ static int _manage_waiting_jobs(struct ostrich_user *user,
 	list_delete_all(user->waiting_jobs,
 			(ListFindF) _list_remove_finished,
 			NULL);
+
 	/* Now we can sort by begin time. */
 	list_sort(user->waiting_jobs,
-		  (ListCmpF) _list_sort_job_begin_time);
+		  _list_sort_job_begin_time);
 
 	camp_iter = list_iterator_create(user->campaigns);
 	job_iter = list_iterator_create(user->waiting_jobs);
@@ -849,16 +857,14 @@ static void _assign_priorities(struct ostrich_schedule *sched)
 
 	/* Sort the combined list of campaigns. */
 	list_sort(all_campaigns,
-		  (ListCmpF) _list_sort_camp_remaining_time);
+		  _list_sort_camp_remaining_time);
 
 	camp_iter = list_iterator_create(all_campaigns);
 
 	while ((camp = (struct ostrich_campaign *) list_next(camp_iter))) {
-		
+		/* Sort the jobs inside each campaign. */
 		if (favor_small)
-			/* Sort the jobs inside each campaign. */
-			list_sort(camp->jobs,
-				  (ListCmpF) _list_sort_job_runtime);
+			list_sort(camp->jobs, _list_sort_job_runtime);
 
 		fs_prio -= list_count(camp->jobs);
 		js_prio = 0;
@@ -874,7 +880,7 @@ static void _assign_priorities(struct ostrich_schedule *sched)
 			job_ptr->prio_factors->priority_fs = fs_prio;
 			job_ptr->prio_factors->priority_js = ++js_prio;
 			job_ptr->prio_factors->priority_part = sched->priority;
-
+//TODO IF JOB RUNNING DONT CHANGE PRIO??
 			prio = fs_prio + js_prio + sched->priority;
 			if (prio < 1)
 				prio = 1;
@@ -938,14 +944,14 @@ static void *_ostrich_agent(void *no_data)
 			list_for_each(sched->users,
 				      (ListForF) _manage_waiting_jobs,
 				      sched);
-			
+
 			prev_allocated = sched->working_cpus;
 			sched->working_cpus = 0;
 			
 			list_for_each(sched->users,
 				      (ListForF) _update_camp_workload,
 				      sched);
-			
+
 			sched->working_cpus = MAX(sched->working_cpus, 1);
 
 			if (sched->total_shares > 0) {
@@ -962,7 +968,7 @@ static void *_ostrich_agent(void *no_data)
 			list_for_each(sched->users,
 				      (ListForF) _update_user_activity,
 				      sched);
-			
+
 			_assign_priorities(sched);
 		}
 
@@ -1038,6 +1044,7 @@ int fini ( void )
 
 extern uint32_t priority_p_set(uint32_t last_prio, struct job_record *job_ptr)
 {
+debug("WELCOME JOB %d with details = %d", job_ptr->job_id, job_ptr->details != NULL);
 	// NOTE: must be called while holding slurmctld_lock_t
 	if (job_ptr->direct_set_prio)
 		return job_ptr->priority;

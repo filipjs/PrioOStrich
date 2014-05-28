@@ -60,7 +60,7 @@ SelectTypeParameters=CR_CPU
 
 # JOB PRIORITY
 PriorityType=priority/ostrich
-PriorityParameters=interval=20,threshold=15
+PriorityParameters=interval=10,threshold=15,mode=2
 PriorityDecayHalfLife=20
 PriorityCalcPeriod=10
 PriorityFavorSmall=YES
