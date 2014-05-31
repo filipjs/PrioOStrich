@@ -207,12 +207,7 @@ static int _list_sort_job_runtime(void *a, void *b)
 {
 	struct job_record *x = *(struct job_record **) a;
 	struct job_record *y = *(struct job_record **) b;
-	int diff = _job_pred_runtime(x) - _job_pred_runtime(y);
-
-	if (diff == 0)
-		return _list_sort_job_begin_time(x, y);
-	else
-		return diff;
+	return (_job_pred_runtime(x) - _job_pred_runtime(y));
 }
 
 static int _list_remove_finished(struct job_record *job_ptr, void *no_data)
@@ -852,28 +847,28 @@ static void _assign_priorities(struct ostrich_schedule *sched)
 	int prio, js_prio, fs_prio =  500000; /* Starting priority. */
 
 	all_campaigns = list_create(NULL); /* Tmp list, no delete function. */
-
+debug("a0");
 	list_for_each(sched->users,
 		      (ListForF) _gather_campaigns,
 		      &all_campaigns);
-
+debug("a1");
 	/* Sort the combined list of campaigns. */
 	list_sort(all_campaigns,
 		  _list_sort_camp_remaining_time);
-
+debug("a2");
 	camp_iter = list_iterator_create(all_campaigns);
 
 	while ((camp = (struct ostrich_campaign *) list_next(camp_iter))) {
 		/* Sort the jobs inside each campaign. */
 		if (favor_small)
 			list_sort(camp->jobs, _list_sort_job_runtime);
-
+debug("a2a");
 		fs_prio -= list_count(camp->jobs);
 		js_prio = 0;
 
 		job_iter = list_iterator_create(camp->jobs);
 		while ((job_ptr = (struct job_record *) list_next(job_iter))) {
-
+//TODO FIXME ODWROTNIE PRZYDZIELA PRIORYTET (PIERWSZA PRACA MA NAJNIZSZY PRIO)
 			if (!job_ptr->prio_factors) {
 				job_ptr->prio_factors = xmalloc(sizeof(priority_factors_object_t));
 				// TODO else ??
@@ -892,7 +887,7 @@ static void _assign_priorities(struct ostrich_schedule *sched)
 		}
 		list_iterator_destroy(job_iter);
 	}
-
+debug("a3");
 	list_iterator_destroy(camp_iter);
 	list_destroy(all_campaigns);
 }
@@ -1049,7 +1044,16 @@ int fini ( void )
 
 extern uint32_t priority_p_set(uint32_t last_prio, struct job_record *job_ptr)
 {
-info("WELCOME JOB %d with details = %d", job_ptr->job_id, job_ptr->details != NULL);
+info("WELCOME JOB %d with details = %d, resv = %d, acc(?) = %s", 
+     job_ptr->job_id, job_ptr->details != NULL,
+	job_ptr->resv_id, job_ptr->account
+);
+if (job_ptr->assoc_ptr)
+	info("YES ASSOC %d %lf", job_ptr->assoc_id, 
+	     ((slurmdb_association_rec_t *) job_ptr->assoc_ptr)->usage->shares_norm);
+else
+	info("NIE MA ASSOC");
+
 	// NOTE: must be called while holding slurmctld_lock_t
 	if (job_ptr->direct_set_prio)
 		return job_ptr->priority;
