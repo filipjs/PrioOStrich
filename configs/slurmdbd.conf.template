@@ -1,0 +1,37 @@
+#
+# Example slurmdbd.conf file.
+#
+# See the slurmdbd.conf man page for more information.
+#
+# Archive info
+#ArchiveJobs=yes
+#ArchiveDir="/tmp"
+#ArchiveSteps=yes
+#ArchiveScript=
+#JobPurge=12
+#StepPurge=1
+#
+# Authentication info
+AuthType=auth/none
+#AuthInfo=
+#
+# slurmDBD info
+DbdHost=localhost
+#DbdPort=7031
+SlurmUser={OWNER}
+#MessageTimeout=300
+DebugLevel=3
+#DefaultQOS=normal,standby
+LogFile={APP_ROOT}/var/log/slurmdbd.log
+PidFile={APP_ROOT}/var/run/slurmdbd.pid
+#PluginDir=/usr/lib/slurm
+#PrivateData=accounts,users,usage,jobs
+#TrackWCKey=yes
+#
+# Database info
+StorageType=accounting_storage/mysql
+StorageHost=localhost
+StoragePort=3306
+StorageUser=filip
+StoragePass=abla
+StorageLoc=slurm_db

@@ -68,7 +68,8 @@ PriorityFavorSmall=YES
 
 # LOGGING AND ACCOUNTING
 AccountingStorageEnforce=0
-AccountingStorageType=accounting_storage/none
+#AccountingStorageType=accounting_storage/none
+AccountingStorageType=accounting_storage/slurmdbd
 ClusterName=cluster
 DebugFlags=Priority
 JobCompType=jobcomp/none

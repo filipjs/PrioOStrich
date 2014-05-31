@@ -12,9 +12,9 @@ Required SLURM support (checked as of 14.03):
 4) each job_update triggers a call to "priority_p_set"
 	- OK
 5) time limit of running jobs cannot be increased
-	- TODO
-6) priority_array must be created manually but doesn't have to be deallocated
-	- TODO
+	- OK (only SlurmUser can do it)
+6) priority_array must be created manually
+	- OK (build in plugin, destroyed in job_update)
 
 
 
@@ -26,4 +26,6 @@ TODO:
 - sprwdzic overflow, szczegolnie przy TIME * CPUS i wszedzie gdzie jest DOUBLE
 
 - prio factors beda wskazywaly na losowa partycje - co z tym zrobic???
+
+- QOS_FLAG_ENFORCE_USAGE_THRES - ta flaga nie moze byc wlaczona [qos_ptr->flags], TODO SPRAWDZIC INNE
 

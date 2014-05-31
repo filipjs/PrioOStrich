@@ -642,6 +642,8 @@ static int _manage_waiting_jobs(struct ostrich_user *user,
 					      &(job_ptr->job_id));
 			if (!dup)
 				list_append(camp->jobs, job_ptr);
+			else
+info("JOB %d DUPLICATE", job_ptr->job_id);
 			/* Advance to the next job. */
 			list_remove(job_iter);
 			job_ptr = (struct job_record *) list_next(job_iter);
@@ -874,9 +876,10 @@ static void _assign_priorities(struct ostrich_schedule *sched)
 
 			if (!job_ptr->prio_factors) {
 				job_ptr->prio_factors = xmalloc(sizeof(priority_factors_object_t));
-				memset(job_ptr->prio_factors, 0, sizeof(priority_factors_object_t));
+				// TODO else ??
+				// memset(job_ptr->prio_factors, 0, sizeof(priority_factors_object_t));
 			}
-
+// TODO factors tylko dla 'glownej' partycji??
 			job_ptr->prio_factors->priority_fs = fs_prio;
 			job_ptr->prio_factors->priority_js = ++js_prio;
 			job_ptr->prio_factors->priority_part = sched->priority;
@@ -930,10 +933,10 @@ static void *_ostrich_agent(void *no_data)
 			config_flag = false;
 			_load_config();
 		}
-
+debug("start");
 		_update_struct();
 		_manage_incoming_jobs();
-
+debug("0");
 		time_skipped = difftime(time(NULL), last_sched_time);
 		last_sched_time = time(NULL);
 		
@@ -944,14 +947,14 @@ static void *_ostrich_agent(void *no_data)
 			list_for_each(sched->users,
 				      (ListForF) _manage_waiting_jobs,
 				      sched);
-
+debug("1");
 			prev_allocated = sched->working_cpus;
 			sched->working_cpus = 0;
 			
 			list_for_each(sched->users,
 				      (ListForF) _update_camp_workload,
 				      sched);
-
+debug("2");
 			sched->working_cpus = MAX(sched->working_cpus, 1);
 
 			if (sched->total_shares > 0) {
@@ -961,6 +964,7 @@ static void *_ostrich_agent(void *no_data)
 				list_for_each(sched->users,
 					      (ListForF) _distribute_time,
 					      &time_skipped);
+debug("2a");
 			}
 
 			sched->total_shares = 0;
@@ -968,8 +972,9 @@ static void *_ostrich_agent(void *no_data)
 			list_for_each(sched->users,
 				      (ListForF) _update_user_activity,
 				      sched);
-
+debug("3");
 			_assign_priorities(sched);
+debug("end");
 		}
 
 		list_iterator_destroy(iter);
@@ -1044,7 +1049,7 @@ int fini ( void )
 
 extern uint32_t priority_p_set(uint32_t last_prio, struct job_record *job_ptr)
 {
-debug("WELCOME JOB %d with details = %d", job_ptr->job_id, job_ptr->details != NULL);
+info("WELCOME JOB %d with details = %d", job_ptr->job_id, job_ptr->details != NULL);
 	// NOTE: must be called while holding slurmctld_lock_t
 	if (job_ptr->direct_set_prio)
 		return job_ptr->priority;
@@ -1052,6 +1057,7 @@ debug("WELCOME JOB %d with details = %d", job_ptr->job_id, job_ptr->details != N
 	//TODO JAK SIE PRACA ZMIENI TO PO PORSTU WYWOLANE BEDZIE JESZCZE RAZ
 // 			has_resv1 = (job_rec1->job_ptr->resv_id != 0); TODO
 	list_enqueue(incoming_jobs, job_ptr);
+	return 0;
 	return 1;
 }
 
