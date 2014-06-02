@@ -20,8 +20,7 @@
 
 /* Mode flags */
 #define MODE_FLAG_ONLY_ASSOC 0x00000000 /* use only associations */
-#define MODE_FLAG_MIXED      0x00000001 /* use associations if present */
-#define MODE_FLAG_NO_ASSOC   0x00000002 /* do not use associations */
+#define MODE_FLAG_NO_ASSOC   0x00000001 /* do not use associations */
 
 /* User type flags */
 #define TYPE_FLAG_NORMAL 0x00000001 /* normal user */
@@ -294,12 +293,9 @@ static int _is_job_modified(struct job_record *job_ptr,
 		return 1;
 
 	/* Check association. */
-	if (user->type_flag == TYPE_FLAG_ASSOC) {
-		if (!job_ptr->assoc_ptr || job_ptr->assoc_id != user->id)
-			return 1;
-	}
-
-//TODO WIECEJ PRZYPADKOW ZALEZNIE OD MODE!!
+	if (user->type_flag == TYPE_FLAG_ASSOC &&
+	   (!job_ptr->assoc_ptr || job_ptr->assoc_id != user->id))
+		return 1;
 
 	/* Check begin time. */
 	if (job_ptr->details->begin_time > time(NULL) ||
@@ -368,7 +364,7 @@ static void _load_config(void)
 		fatal("OStrich: invalid interval: %d", schedule_interval);
 	if (threshold < 60)
 		fatal("OStrich: invalid threshold: %d", threshold);
-	if (mode > 2)
+	if (mode > 1)
 		fatal("OStrich: invalid mode: %d", mode);
 
 	if (slurm_get_priority_favor_small())
@@ -512,19 +508,9 @@ static void _place_waiting_job(struct job_record *job_ptr, char *part_name)
 			// TODO JOB_PRIO = 0 I JAKIS REASON??
 			return;
 		}
-	} else if (mode == MODE_FLAG_NO_ASSOC) {
+	} else {  // no assoc mode
 		key.user_id = job_ptr->user_id;
 		key.user_type = TYPE_FLAG_NORMAL;
-	} else {  // mixed mode
-		if (job_ptr->assoc_ptr) {
-			key.user_id = job_ptr->assoc_id;
-			key.user_type = TYPE_FLAG_ASSOC;
-		} else {
-			key.user_id = job_ptr->user_id;
-			key.user_type = TYPE_FLAG_NORMAL;
-			debug("OStrich: mixed mode, job %d without association",
-			      job_ptr->job_id);
-		}
 	}
 
 	user = list_find_first(sched->users,
