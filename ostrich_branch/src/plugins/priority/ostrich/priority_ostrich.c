@@ -16,6 +16,7 @@
 #define DEFAULT_JOB_LIMIT  60 * 24 * 7 * 365
 
 #define DEFAULT_NORM_SHARE 0.01
+#define MINIMUM_NORM_SHARE 0.000001
 
 /* Mode flags */
 #define MODE_FLAG_ONLY_ASSOC 0x00000000 /* use only associations */
@@ -298,6 +299,8 @@ static int _is_job_modified(struct job_record *job_ptr,
 			return 1;
 	}
 
+//TODO WIECEJ PRZYPADKOW ZALEZNIE OD MODE!!
+
 	/* Check begin time. */
 	if (job_ptr->details->begin_time > time(NULL) ||
 	    job_ptr->details->begin_time > camp->accept_point)
@@ -545,12 +548,14 @@ static void _place_waiting_job(struct job_record *job_ptr, char *part_name)
 
 		list_append(sched->users, user);
 	}
+info("DODALEM PRACE %d DO USERA %d %d",
+     job_ptr->job_id, user->id, user->type_flag);
 
 	/* Set/update normalized share. */
 	if (user->type_flag == TYPE_FLAG_ASSOC) {
 		assoc = (slurmdb_association_rec_t *) job_ptr->assoc_ptr;
-		user->norm_share = assoc->usage->shares_norm;
-		//TODO CZY TO MOZE BYC ZERO?? MOZE JEDNAK USTAWIC JAKIES DEFAULTOWE MINIMUM??
+		user->norm_share = MAX(assoc->usage->shares_norm,
+				       MINIMUM_NORM_SHARE);
 	} else
 		user->norm_share = DEFAULT_NORM_SHARE;
 
@@ -659,9 +664,9 @@ info("JOB %d DUPLICATE", job_ptr->job_id);
 	return 0;
 }
 
-//TODO OPIS
-//* Check the boundaries of all the jobs in the campaigns.
-// 	 * Calculate the number of allocated cpus in this partition. */
+/* _update_camp_workload - calculate the workload of each campaign.
+ * 	Count the number of active cpus in the partition.
+ */
 static int _update_camp_workload(struct ostrich_user *user,
 				 struct ostrich_schedule *sched)
 {
@@ -698,6 +703,8 @@ static int _update_camp_workload(struct ostrich_user *user,
 			/* Validate the job */
 			if (_is_job_modified(job_ptr, camp, user, sched)) {
 				list_remove(job_iter);
+info("USUWAM PRACE %d USER %d %d",
+     job_ptr->job_id, user->id, user->type_flag);
 				continue;
 			}
 			/* Note: if a job is updated, it will be re-introduced to the system. 
@@ -726,6 +733,7 @@ static int _update_camp_workload(struct ostrich_user *user,
 	return 0;
 }
 
+/* _distribute_time - add virtual time to active accounts */
 static int _distribute_time(struct ostrich_user *user, double *time_tick)
 {
 	if (user->active_campaigns)
@@ -733,11 +741,8 @@ static int _distribute_time(struct ostrich_user *user, double *time_tick)
 	return 0;
 }
 
-//TODO OPIS FIXME
-/* _check_user_activity - further processing of the user on the given partition.
- *	4) Redistribute virtual time between campaigns so that earlier created
- *	campaigns finish first in the virtual schedule.
- *	5) Count shares of active users.
+/* _update_user_activity - redistribute the virtual time between campaigns.
+ * 	Count the number of shares from active users.
  */
 static int _update_user_activity(struct ostrich_user *user,
 				  struct ostrich_schedule *sched)
@@ -775,8 +780,7 @@ static int _update_user_activity(struct ostrich_user *user,
 
 		if (_campaign_time_left(camp) == 0) {
 			/* Campaign ended in the virtual schedule. */
-			if (list_is_empty(camp->jobs) &&
-				time(NULL) > camp->accept_point)
+			if (list_is_empty(camp->jobs))
 				/* It also ended in the real schedule. */
 				list_delete_item(iter);
 		} else {
@@ -802,9 +806,7 @@ static int _gather_campaigns(struct ostrich_user *user, List *l)
 	return 0;
 }
 
-/* _set_multi_prio - set the priority of the job to 'prio'.
- * Note: priority is set only for the given partition by utilizing priority_array.
- */
+/* _set_multi_prio - set the priority of the job to 'prio' using priority_array */
 static void _set_multi_prio(struct job_record *job_ptr, uint32_t prio,
 			    struct ostrich_schedule *sched)
 {
@@ -831,10 +833,6 @@ static void _set_multi_prio(struct job_record *job_ptr, uint32_t prio,
 		}
 		list_iterator_destroy(iter);
 	}
-	if (job_ptr->part_ptr) {
-		if (strcmp(job_ptr->part_ptr->name, sched->part_name) == 0)
-			job_ptr->priority = prio;
-	}
 }
 
 /* _assign_priorities - set the priority for all the jobs in the partition. */
@@ -847,47 +845,51 @@ static void _assign_priorities(struct ostrich_schedule *sched)
 	int prio, js_prio, fs_prio =  500000; /* Starting priority. */
 
 	all_campaigns = list_create(NULL); /* Tmp list, no delete function. */
-debug("a0");
+
 	list_for_each(sched->users,
 		      (ListForF) _gather_campaigns,
 		      &all_campaigns);
-debug("a1");
+
 	/* Sort the combined list of campaigns. */
 	list_sort(all_campaigns,
 		  _list_sort_camp_remaining_time);
-debug("a2");
+
 	camp_iter = list_iterator_create(all_campaigns);
 
 	while ((camp = (struct ostrich_campaign *) list_next(camp_iter))) {
 		/* Sort the jobs inside each campaign. */
 		if (favor_small)
 			list_sort(camp->jobs, _list_sort_job_runtime);
-debug("a2a");
+
 		fs_prio -= list_count(camp->jobs);
-		js_prio = 0;
+		js_prio = list_count(camp->jobs);
 
 		job_iter = list_iterator_create(camp->jobs);
 		while ((job_ptr = (struct job_record *) list_next(job_iter))) {
-//TODO FIXME ODWROTNIE PRZYDZIELA PRIORYTET (PIERWSZA PRACA MA NAJNIZSZY PRIO)
-			if (!job_ptr->prio_factors) {
-				job_ptr->prio_factors = xmalloc(sizeof(priority_factors_object_t));
-				// TODO else ??
-				// memset(job_ptr->prio_factors, 0, sizeof(priority_factors_object_t));
-			}
-// TODO factors tylko dla 'glownej' partycji??
-			job_ptr->prio_factors->priority_fs = fs_prio;
-			job_ptr->prio_factors->priority_js = ++js_prio;
-			job_ptr->prio_factors->priority_part = sched->priority;
 //TODO IF JOB RUNNING DONT CHANGE PRIO??
 			prio = fs_prio + js_prio + sched->priority;
 			if (prio < 1)
 				prio = 1;
 
+			if (!job_ptr->prio_factors)
+				job_ptr->prio_factors = xmalloc(sizeof(priority_factors_object_t));
+
+			if (job_ptr->part_ptr &&
+			    strcmp(job_ptr->part_ptr->name, sched->part_name) == 0) {
+				/* This is the 'main' partition of the job */
+				job_ptr->priority = prio;
+
+				job_ptr->prio_factors->priority_fs = fs_prio;
+				job_ptr->prio_factors->priority_js = js_prio;
+				job_ptr->prio_factors->priority_part = sched->priority;
+			}
+
 			_set_multi_prio(job_ptr, prio, sched);
+			js_prio--;
 		}
 		list_iterator_destroy(job_iter);
 	}
-debug("a3");
+
 	list_iterator_destroy(camp_iter);
 	list_destroy(all_campaigns);
 }
@@ -1042,8 +1044,12 @@ int fini ( void )
  * The remainder of this file implements the standard SLURM priority API.
  */
 
+/* 
+ * NOTE: must be called while holding slurmctld_lock_t
+ */ 
 extern uint32_t priority_p_set(uint32_t last_prio, struct job_record *job_ptr)
 {
+
 info("WELCOME JOB %d with details = %d, resv = %d, acc(?) = %s", 
      job_ptr->job_id, job_ptr->details != NULL,
 	job_ptr->resv_id, job_ptr->account
@@ -1054,7 +1060,11 @@ if (job_ptr->assoc_ptr)
 else
 	info("NIE MA ASSOC");
 
-	// NOTE: must be called while holding slurmctld_lock_t
+	if (!job_ptr->prio_factors)
+		job_ptr->prio_factors = xmalloc(sizeof(priority_factors_object_t));
+	else
+		memset(job_ptr->prio_factors, 0, sizeof(priority_factors_object_t));
+
 	if (job_ptr->direct_set_prio)
 		return job_ptr->priority;
 	//TODO DODAC TUTAJ TEZ OD RAZU REZERWACJE

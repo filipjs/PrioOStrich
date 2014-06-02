@@ -11,11 +11,12 @@ Required SLURM support (checked as of 14.03):
 	- OK
 4) each job_update triggers a call to "priority_p_set"
 	- OK
-5) time limit of running jobs cannot be increased
+5) time limit/account of running jobs cannot be increased/changed
 	- OK (only SlurmUser can do it)
 6) priority_array must be created manually
 	- OK (build in plugin, destroyed in job_update)
-
+7) prio_factors aren't altered outside of plugin
+	- OK
 
 
 TODO:
@@ -24,6 +25,7 @@ TODO:
 - job update bedzie ustawial prio na 0/1.. nie zmieniac prio po updacie??
 
 - sprwdzic overflow, szczegolnie przy TIME * CPUS i wszedzie gdzie jest DOUBLE
+  - sprawdzic dzielania przez double (aka czy nie ma gdzies przez 0)
 
 - prio factors beda wskazywaly na losowa partycje - co z tym zrobic???
 
