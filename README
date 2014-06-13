@@ -9,13 +9,15 @@ Required SLURM support (checked as of 14.03):
 	- OK
 3) "priority_p_set" calls inside slurmctld_lock_t (write jobs)
 	- OK
-4) each job_update triggers a call to "priority_p_set"
+4) not finished jobs have valid "details" pointer
 	- OK
-5) time limit/account of running jobs cannot be increased/changed
+5) each job_update triggers a call to "priority_p_set"
+	- OK
+6) time limit/account of running jobs cannot be increased/changed
 	- OK (only SlurmUser can do it)
-6) priority_array must be created manually
+7) priority_array must be created manually
 	- OK (build in plugin, destroyed in job_update)
-7) prio_factors aren't altered outside of plugin
+8) prio_factors aren't altered outside of plugin
 	- OK
 
 
@@ -27,7 +29,7 @@ TODO:
 - sprwdzic overflow, szczegolnie przy TIME * CPUS i wszedzie gdzie jest DOUBLE
   - sprawdzic dzielania przez double (aka czy nie ma gdzies przez 0)
 
-- prio factors beda wskazywaly na losowa partycje - co z tym zrobic???
-
 - QOS_FLAG_ENFORCE_USAGE_THRES - ta flaga nie moze byc wlaczona [qos_ptr->flags], TODO SPRAWDZIC INNE
+
+- sprawdzic czy dziala 'static prio' przy rezerwacjach
 

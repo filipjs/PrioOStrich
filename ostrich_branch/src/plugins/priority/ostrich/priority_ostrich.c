@@ -126,7 +126,7 @@ static int _distribute_time(struct ostrich_user *user, double *time_tick);
 static int _update_user_activity(struct ostrich_user *user,
 				  struct ostrich_schedule *sched);
 static int _gather_campaigns(struct ostrich_user *user, List *l);
-static void _set_multi_prio(struct job_record *job_ptr, uint32_t prio,
+static void _set_array_prio(struct job_record *job_ptr, uint32_t prio,
 			    struct ostrich_schedule *sched);
 static void _assign_priorities(struct ostrich_schedule *sched);
 
@@ -793,7 +793,7 @@ static int _gather_campaigns(struct ostrich_user *user, List *l)
 }
 
 /* _set_multi_prio - set the priority of the job to 'prio' using priority_array */
-static void _set_multi_prio(struct job_record *job_ptr, uint32_t prio,
+static void _set_array_prio(struct job_record *job_ptr, uint32_t prio,
 			    struct ostrich_schedule *sched)
 {
 	struct part_record *part_ptr;
@@ -852,26 +852,29 @@ static void _assign_priorities(struct ostrich_schedule *sched)
 
 		job_iter = list_iterator_create(camp->jobs);
 		while ((job_ptr = (struct job_record *) list_next(job_iter))) {
-//TODO IF JOB RUNNING DONT CHANGE PRIO??
-			prio = fs_prio + js_prio + sched->priority;
-			if (prio < 1)
-				prio = 1;
+			if (!IS_JOB_RUNNING(job_ptr)) {
 
-			if (!job_ptr->prio_factors)
-				job_ptr->prio_factors = xmalloc(sizeof(priority_factors_object_t));
+				prio = fs_prio + js_prio + sched->priority;
+				if (prio < 1)
+					prio = 1;
 
-			if (job_ptr->part_ptr &&
-			    strcmp(job_ptr->part_ptr->name, sched->part_name) == 0) {
-				/* This is the 'main' partition of the job */
-				job_ptr->priority = prio;
+				if (!job_ptr->prio_factors)
+					job_ptr->prio_factors = 
+						xmalloc(sizeof(priority_factors_object_t));
 
-				job_ptr->prio_factors->priority_fs = fs_prio;
-				job_ptr->prio_factors->priority_js = js_prio;
-				job_ptr->prio_factors->priority_part = sched->priority;
+				if (job_ptr->part_ptr &&
+				strcmp(job_ptr->part_ptr->name, sched->part_name) == 0) {
+					/* This is the 'main' partition of the job */
+					job_ptr->priority = prio;
+
+					job_ptr->prio_factors->priority_fs = fs_prio;
+					job_ptr->prio_factors->priority_js = js_prio;
+					job_ptr->prio_factors->priority_part = sched->priority;
+				}
+
+				_set_array_prio(job_ptr, prio, sched);
+				js_prio--;
 			}
-
-			_set_multi_prio(job_ptr, prio, sched);
-			js_prio--;
 		}
 		list_iterator_destroy(job_iter);
 	}
@@ -916,7 +919,7 @@ static void *_ostrich_agent(void *no_data)
 			config_flag = false;
 			_load_config();
 		}
-debug("start");
+
 		_update_struct();
 		_manage_incoming_jobs();
 debug("0");
@@ -967,8 +970,6 @@ debug("end");
 		END_TIMER2("OStrich: ostrich_agent");
 		debug2("OStrich: schedule iteration %s", TIME_STR);
 	}
-
-	debug("OSTRICH THREAD ENDED"); // TODO DELETE
 	/* Cleanup. */
 	list_destroy(ostrich_sched_list);
 	list_destroy(incoming_jobs);
@@ -1035,6 +1036,7 @@ int fini ( void )
  */ 
 extern uint32_t priority_p_set(uint32_t last_prio, struct job_record *job_ptr)
 {
+	static int resv_queue = 1000000;
 
 info("WELCOME JOB %d with details = %d, resv = %d, acc(?) = %s", 
      job_ptr->job_id, job_ptr->details != NULL,
@@ -1046,19 +1048,19 @@ if (job_ptr->assoc_ptr)
 else
 	info("NIE MA ASSOC");
 
-	if (!job_ptr->prio_factors)
-		job_ptr->prio_factors = xmalloc(sizeof(priority_factors_object_t));
-	else
+	if (job_ptr->priority_array)
+		xfree(job_ptr->priority_array);
+	if (job_ptr->prio_factors)
 		memset(job_ptr->prio_factors, 0, sizeof(priority_factors_object_t));
 
 	if (job_ptr->direct_set_prio)
 		return job_ptr->priority;
-	//TODO DODAC TUTAJ TEZ OD RAZU REZERWACJE
-	//TODO JAK SIE PRACA ZMIENI TO PO PORSTU WYWOLANE BEDZIE JESZCZE RAZ
-// 			has_resv1 = (job_rec1->job_ptr->resv_id != 0); TODO
+	
+	if (job_ptr->resv_id)
+		return resv_queue--;
+
 	list_enqueue(incoming_jobs, job_ptr);
 	return 0;
-	return 1;
 }
 
 extern void priority_p_reconfig(bool assoc_clear)
