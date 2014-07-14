@@ -1,4 +1,24 @@
-#include <pthread.h>
+/*
+ * TODO opis, licencja itp.
+ *
+ */
+
+#if HAVE_FLOAT_H
+#  include <float.h>
+#endif
+#if HAVE_STDINT_H
+#  include <stdint.h>
+#endif
+#if HAVE_INTTYPES_H
+#  include <inttypes.h>
+#endif
+#ifdef WITH_PTHREADS
+#  include <pthread.h>
+#endif
+#if HAVE_VALUES_H
+#  include <values.h>
+#endif
+
 #include <stdio.h>
 
 #include "slurm/slurm_errno.h"
@@ -25,6 +45,15 @@
 /* User type flags */
 #define TYPE_FLAG_NORMAL 0x00000001 /* normal user */
 #define TYPE_FLAG_ASSOC  0x00000002 /* account association */
+
+
+/*
+ * Detect if priority plugin support patch is present in versions < 14.11
+ */
+#ifndef SLURM_14_11_PROTOCOL_VERSION
+char *slurm_get_priority_params(void) __attribute__((weak_import));
+char *slurm_get_priority_params(void) { return "not_patched"; }
+#endif
 
 
 const char plugin_name[]       	= "Priority OSTRICH plugin";
@@ -256,16 +285,16 @@ static uint32_t _job_real_runtime(struct job_record *job_ptr)
 /* _***_resources - calculate the number of cpus used by the job */
 static uint32_t _serial_resources(struct job_record *job_ptr)
 {
-	// TODO
-	xassert (0);
-	return 0;
+	return 1;
 }
 
 static uint32_t _linear_resources(struct job_record *job_ptr)
 {
-	// TODO 
-	xassert (0);
-	return 0;
+	if (IS_JOB_STARTED(job_ptr))
+		return job_ptr->total_cpus;
+	else
+		// TODO 
+		return 1;
 }
 
 static uint32_t _cons_resources(struct job_record *job_ptr)
@@ -334,13 +363,24 @@ static uint32_t _campaign_time_left(struct ostrich_campaign *camp)
 
 static void _load_config(void)
 {
-	char *sched_type, *select_type, *preempt_type, *tmp_ptr;
+	char *prio_params, *sched_type, *select_type, *preempt_type, *tmp_ptr;
 	uint32_t req_job_age;
 
-// 	if (protocol_version >= SLURM_14_10_PROTOCOL_VERSION) // TODO FIXME
-	if (1) {
-		char *prio_params = slurm_get_priority_params();
-
+	prio_params = slurm_get_priority_params();
+#ifndef SLURM_14_11_PROTOCOL_VERSION
+	if (prio_params && strcmp(prio_params, "not_patched") == 0) {
+info("NOT PATCHED %s", prio_params);//TODO DEL
+		/* 'fix' in versions without 'PriorityParameters'
+		 * calc_period is in minutes, we need seconds for interval
+		 * priority_decay is minutes, same as threshold
+		 */
+		schedule_interval = slurm_get_priority_calc_period() / 60;
+		threshold = slurm_get_priority_decay_hl();
+		mode = MODE_FLAG_NO_ASSOC;
+	} else {
+info("PATCHED");
+if (prio_params == NULL) info("BUT EMPTY");
+else info("HERE %s", prio_params);
 		/* from PriorityParameters:
 		 * interval is in seconds, threshold in minutes */
 		if (prio_params && (tmp_ptr=strstr(prio_params, "interval=")))
@@ -351,14 +391,18 @@ static void _load_config(void)
 			mode = atoi(tmp_ptr + 5);
 
 		xfree(prio_params);
-	} else {
-		/* 'fix' in older versions without 'PriorityParameters'
-		 * calc_period is in minutes, we need seconds for interval */
-		schedule_interval = slurm_get_priority_calc_period() / 60;
-		threshold = slurm_get_priority_decay_hl();
-		mode = MODE_FLAG_NO_ASSOC;
 	}
-	// TODO JESZCZE JEDEN IF DLA WERSJI < 2.6 I WTEDY NIE UZYWAC PRIORITY ARRAYS??
+#else
+	/* from PriorityParameters:
+	 * interval is in seconds, threshold in minutes */
+	if (prio_params && (tmp_ptr=strstr(prio_params, "interval=")))
+		schedule_interval = atoi(tmp_ptr + 9);
+	if (prio_params && (tmp_ptr=strstr(prio_params, "threshold=")))
+		threshold = atoi(tmp_ptr + 10) * 60;
+	if (prio_params && (tmp_ptr=strstr(prio_params, "mode=")))
+		mode = atoi(tmp_ptr + 5);
+	xfree(prio_params);
+#endif
 
 	if (schedule_interval < 1)
 		fatal("OStrich: invalid interval: %d", schedule_interval);
@@ -391,10 +435,9 @@ static void _load_config(void)
 		_job_resources = _serial_resources;
 	else if (strcmp(select_type, "select/linear") == 0)
 		_job_resources = _linear_resources;
-	else if (strcmp(select_type, "select/cons_res") == 0)
-		_job_resources = _cons_resources;
 	else
-		xassert (0); // TODO FIXME A CO DLA SELECT/CRAY SELECT/BLUEGENE??
+		_job_resources = _cons_resources;
+	info("OStrich: Select %s", select_type);
 	xfree(select_type);
 
 	if (slurm_get_debug_flags() & DEBUG_FLAG_PRIO)
@@ -767,6 +810,8 @@ static int _update_user_activity(struct ostrich_user *user,
 		if (_campaign_time_left(camp) == 0) {
 			/* Campaign ended in the virtual schedule. */
 			if (list_is_empty(camp->jobs))
+//TODO HM>> W SYMULATORZE NIE SA USUWAN JESLI NIE MINIE THRESHOLD
+//TODO CZY JEDNAK TO SPRWDZAC TUTAJ?? BYL KONTRPRZYKLAD??
 				/* It also ended in the real schedule. */
 				list_delete_item(iter);
 		} else {
@@ -1036,7 +1081,7 @@ int fini ( void )
  */ 
 extern uint32_t priority_p_set(uint32_t last_prio, struct job_record *job_ptr)
 {
-	static int resv_queue = 1000000;
+	static int resv_queue = 100000000;
 
 info("WELCOME JOB %d with details = %d, resv = %d, acc(?) = %s", 
      job_ptr->job_id, job_ptr->details != NULL,
@@ -1065,7 +1110,6 @@ else
 
 extern void priority_p_reconfig(bool assoc_clear)
 {
-	// TODO FIXME TO NIE JEST POD SLURM LOCKIEM, ALBO NAPRAWIC ALBO DODAC WLASNY LOCK!!
 	config_flag = true;
 	return;
 }
