@@ -1,0 +1,217 @@
+From 3c84d5934579def8d8b1869f74333a51e47a0007 Mon Sep 17 00:00:00 2001
+From: Filip <filip@filip-desktop.(none)>
+Date: Mon, 14 Jul 2014 16:17:23 +0200
+Subject: [PATCH] priority plugin support
+
+---
+ contribs/perlapi/libslurm/perl/conf.c |    5 +++++
+ slurm/slurm.h.in                      |    1 +
+ src/api/config_info.c                 |    5 +++++
+ src/common/assoc_mgr.c                |    2 +-
+ src/common/read_config.c              |    6 ++++++
+ src/common/slurm_protocol_api.c       |   16 ++++++++++++++++
+ src/common/slurm_protocol_api.h       |    4 ++++
+ src/common/slurm_protocol_pack.c      |    3 +++
+ src/slurmctld/proc_req.c              |    1 +
+ src/sprio/sprio.c                     |    2 +-
+ 10 files changed, 43 insertions(+), 2 deletions(-)
+
+diff --git a/contribs/perlapi/libslurm/perl/conf.c b/contribs/perlapi/libslurm/perl/conf.c
+index d537e85..5d7fa86 100644
+--- a/contribs/perlapi/libslurm/perl/conf.c
++++ b/contribs/perlapi/libslurm/perl/conf.c
+@@ -140,9 +140,12 @@ slurm_ctl_conf_to_hv(slurm_ctl_conf_t *conf, HV *hv)
+ 	STORE_FIELD(hv, conf, preempt_mode, uint16_t);
+ 	if(conf->preempt_type)
+ 		STORE_FIELD(hv, conf, preempt_type, charp);
++	STORE_FIELD(hv, conf, priority_calc_period, uint32_t);
+ 	STORE_FIELD(hv, conf, priority_decay_hl, uint32_t);
+ 	STORE_FIELD(hv, conf, priority_favor_small, uint16_t);
+ 	STORE_FIELD(hv, conf, priority_max_age, uint32_t);
++	if(conf->priority_params)
++		STORE_FIELD(hv, conf, priority_params, charp);
+ 	STORE_FIELD(hv, conf, priority_reset_period, uint16_t);
+ 	if(conf->priority_type)
+ 		STORE_FIELD(hv, conf, priority_type, charp);
+@@ -354,9 +357,11 @@ hv_to_slurm_ctl_conf(HV *hv, slurm_ctl_conf_t *conf)
+ 	FETCH_FIELD(hv, conf, plugstack, charp, FALSE);
+ 	FETCH_FIELD(hv, conf, preempt_mode, uint16_t, TRUE);
+ 	FETCH_FIELD(hv, conf, preempt_type, charp, FALSE);
++	FETCH_FIELD(hv, conf, priority_calc_period, uint32_t, TRUE);
+ 	FETCH_FIELD(hv, conf, priority_decay_hl, uint32_t, TRUE);
+ 	FETCH_FIELD(hv, conf, priority_favor_small, uint16_t, TRUE);
+ 	FETCH_FIELD(hv, conf, priority_max_age, uint32_t, TRUE);
++	FETCH_FIELD(hv, conf, priority_params, charp, FALSE);
+ 	FETCH_FIELD(hv, conf, priority_reset_period, uint16_t, TRUE);
+ 	FETCH_FIELD(hv, conf, priority_type, charp, FALSE);
+ 
+diff --git a/slurm/slurm.h.in b/slurm/slurm.h.in
+index cc71f44..469a130 100644
+--- a/slurm/slurm.h.in
++++ b/slurm/slurm.h.in
+@@ -2154,6 +2154,7 @@ typedef struct slurm_ctl_conf {
+ 				  * see PRIORITY_FLAGS_* above */
+ 	uint32_t priority_max_age; /* time when not to add any more
+ 				    * priority to a job if reached */
++    	char *priority_params;	/* priority plugin parameters */
+ 	uint16_t priority_reset_period; /* when to clear usage,
+ 					 * see PRIORITY_RESET_* */
+ 	char *priority_type;    /* priority type plugin */
+diff --git a/src/api/config_info.c b/src/api/config_info.c
+index e812776..65d24f6 100644
+--- a/src/api/config_info.c
++++ b/src/api/config_info.c
+@@ -733,6 +733,11 @@ extern void *slurm_ctl_conf_2_key_pairs (slurm_ctl_conf_t* slurm_ctl_conf_ptr)
+ 	key_pair->value = xstrdup(slurm_ctl_conf_ptr->preempt_type);
+ 	list_append(ret_list, key_pair);
+ 
++	key_pair = xmalloc(sizeof(config_key_pair_t));
++	key_pair->name = xstrdup("PriorityParameters");
++	key_pair->value = xstrdup(slurm_ctl_conf_ptr->priority_params);
++	list_append(ret_list, key_pair);
++
+ 	if (strcmp(slurm_ctl_conf_ptr->priority_type, "priority/basic") == 0) {
+ 		key_pair = xmalloc(sizeof(config_key_pair_t));
+ 		key_pair->name = xstrdup("PriorityType");
+diff --git a/src/common/assoc_mgr.c b/src/common/assoc_mgr.c
+index c56216d..f434bd5 100644
+--- a/src/common/assoc_mgr.c
++++ b/src/common/assoc_mgr.c
+@@ -1221,7 +1221,7 @@ extern int assoc_mgr_init(void *db_conn, assoc_init_args_t *args,
+ 
+ 	if (!checked_prio) {
+ 		char *prio = slurm_get_priority_type();
+-		if (prio && !strncmp(prio, "priority/multifactor", 20))
++		if (prio && strcmp(prio, "priority/basic"))
+ 			setup_children = 1;
+ 
+ 		xfree(prio);
+diff --git a/src/common/read_config.c b/src/common/read_config.c
+index 4f7d928..9bac761 100644
+--- a/src/common/read_config.c
++++ b/src/common/read_config.c
+@@ -254,6 +254,7 @@ s_p_options_t slurm_conf_options[] = {
+ 	{"PriorityCalcPeriod", S_P_STRING},
+ 	{"PriorityFavorSmall", S_P_BOOLEAN},
+ 	{"PriorityMaxAge", S_P_STRING},
++	{"PriorityParameters", S_P_STRING},
+ 	{"PriorityUsageResetPeriod", S_P_STRING},
+ 	{"PriorityType", S_P_STRING},
+ 	{"PriorityFlags", S_P_STRING},
+@@ -2155,6 +2156,7 @@ free_slurm_conf (slurm_ctl_conf_t *ctl_conf_ptr, bool purge_node_hash)
+ 	xfree (ctl_conf_ptr->plugindir);
+ 	xfree (ctl_conf_ptr->plugstack);
+ 	xfree (ctl_conf_ptr->preempt_type);
++	xfree (ctl_conf_ptr->priority_params);
+ 	xfree (ctl_conf_ptr->priority_type);
+ 	xfree (ctl_conf_ptr->proctrack_type);
+ 	xfree (ctl_conf_ptr->prolog);
+@@ -2291,6 +2293,8 @@ init_slurm_conf (slurm_ctl_conf_t *ctl_conf_ptr)
+ 	xfree (ctl_conf_ptr->plugstack);
+ 	ctl_conf_ptr->preempt_mode              = 0;
+ 	xfree (ctl_conf_ptr->preempt_type);
++	xfree (ctl_conf_ptr->priority_params);
++	xfree (ctl_conf_ptr->priority_type);
+ 	ctl_conf_ptr->private_data              = 0;
+ 	xfree (ctl_conf_ptr->proctrack_type);
+ 	xfree (ctl_conf_ptr->prolog);
+@@ -3394,6 +3398,8 @@ _validate_and_set_defaults(slurm_ctl_conf_t *conf, s_p_hashtbl_t *hashtbl)
+ 	} else
+ 		conf->priority_max_age = DEFAULT_PRIORITY_DECAY;
+ 
++	s_p_get_string(&conf->priority_params, "PriorityParameters", hashtbl);
++
+ 	if (s_p_get_string(&temp_str, "PriorityUsageResetPeriod", hashtbl)) {
+ 		if (strcasecmp(temp_str, "none") == 0)
+ 			conf->priority_reset_period = PRIORITY_RESET_NONE;
+diff --git a/src/common/slurm_protocol_api.c b/src/common/slurm_protocol_api.c
+index 3a34d94..2d57df4 100644
+--- a/src/common/slurm_protocol_api.c
++++ b/src/common/slurm_protocol_api.c
+@@ -558,6 +558,22 @@ uint32_t slurm_get_priority_max_age(void)
+ 	return age;
+ }
+ 
++/* slurm_get_priority_params
++ * RET char * - Value of PriorityParameters, MUST be xfreed by caller */
++char *slurm_get_priority_params(void)
++{
++	char *params = 0;
++	slurm_ctl_conf_t *conf;
++
++ 	if (slurmdbd_conf) {
++	} else {
++		conf = slurm_conf_lock();
++		params = xstrdup(conf->priority_params);
++		slurm_conf_unlock();
++	}
++	return params;
++}
++
+ /* slurm_get_priority_reset_period
+  * returns the priority usage reset period from slurmctld_conf object
+  * RET uint16_t - flag, see PRIORITY_RESET_* in slurm/slurm.h.
+diff --git a/src/common/slurm_protocol_api.h b/src/common/slurm_protocol_api.h
+index 4dc0849..5215e33 100644
+--- a/src/common/slurm_protocol_api.h
++++ b/src/common/slurm_protocol_api.h
+@@ -264,6 +264,10 @@ bool slurm_get_priority_favor_small(void);
+  */
+ uint32_t slurm_get_priority_max_age(void);
+ 
++/* slurm_get_priority_params
++ * RET char * - Value of PriorityParameters, MUST be xfreed by caller */
++char *slurm_get_priority_params(void);
++
+ /* slurm_get_priority_reset_period
+  * returns the priority usage reset period in seconds from slurmctld_conf object
+  * RET uint16_t - flag, see PRIORITY_RESET_* in slurm/slurm.h.
+diff --git a/src/common/slurm_protocol_pack.c b/src/common/slurm_protocol_pack.c
+index 3c61164..ad200cc 100644
+--- a/src/common/slurm_protocol_pack.c
++++ b/src/common/slurm_protocol_pack.c
+@@ -4997,6 +4997,7 @@ _pack_slurm_ctl_conf_msg(slurm_ctl_conf_info_msg_t * build_ptr, Buf buffer,
+ 		pack16(build_ptr->priority_favor_small, buffer);
+ 		pack16(build_ptr->priority_flags, buffer);
+ 		pack32(build_ptr->priority_max_age, buffer);
++		packstr(build_ptr->priority_params, buffer);
+ 		pack16(build_ptr->priority_reset_period, buffer);
+ 		packstr(build_ptr->priority_type, buffer);
+ 		pack32(build_ptr->priority_weight_age, buffer);
+@@ -5541,6 +5542,8 @@ _unpack_slurm_ctl_conf_msg(slurm_ctl_conf_info_msg_t **build_buffer_ptr,
+ 		safe_unpack16(&build_ptr->priority_favor_small, buffer);
+ 		safe_unpack16(&build_ptr->priority_flags, buffer);
+ 		safe_unpack32(&build_ptr->priority_max_age, buffer);
++		safe_unpackstr_xmalloc(&build_ptr->priority_params, &uint32_tmp, 
++				       buffer);
+ 		safe_unpack16(&build_ptr->priority_reset_period, buffer);
+ 		safe_unpackstr_xmalloc(&build_ptr->priority_type, &uint32_tmp,
+ 				       buffer);
+diff --git a/src/slurmctld/proc_req.c b/src/slurmctld/proc_req.c
+index 5f12aab..6836fba 100644
+--- a/src/slurmctld/proc_req.c
++++ b/src/slurmctld/proc_req.c
+@@ -702,6 +702,7 @@ void _fill_ctld_conf(slurm_ctl_conf_t * conf_ptr)
+ 	conf_ptr->priority_favor_small= conf->priority_favor_small;
+ 	conf_ptr->priority_flags      = conf->priority_flags;
+ 	conf_ptr->priority_max_age    = conf->priority_max_age;
++	conf_ptr->priority_params     = xstrdup(conf->priority_params);
+ 	conf_ptr->priority_reset_period = conf->priority_reset_period;
+ 	conf_ptr->priority_type       = xstrdup(conf->priority_type);
+ 	conf_ptr->priority_weight_age = conf->priority_weight_age;
+diff --git a/src/sprio/sprio.c b/src/sprio/sprio.c
+index 7a438bc..04e1d42 100644
+--- a/src/sprio/sprio.c
++++ b/src/sprio/sprio.c
+@@ -116,7 +116,7 @@ int main (int argc, char *argv[])
+ 	}
+ 
+ 	/* Check to see if we are running a supported accounting plugin */
+-	if (strncasecmp(prio_type, "priority/multifactor", 20)) {
++	if (strcasecmp(prio_type, "priority/basic") == 0) {
+ 		fprintf (stderr, "You are not running a supported "
+ 			 "priority plugin\n(%s).\n"
+ 			 "Only 'priority/multifactor' and "
+-- 
+1.7.9.5
+
