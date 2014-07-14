@@ -33,3 +33,10 @@ TODO:
 
 - sprawdzic czy dziala 'static prio' przy rezerwacjach
 
+
+
+qos->usage->grp_used_cpu_run_secs
+qos->usage->grp_used_wall += run_decay;
+qos->usage->usage_raw += (long double)real_decay;
+
+// to samo jest w assoc -> az do root

@@ -369,7 +369,7 @@ static void _load_config(void)
 	prio_params = slurm_get_priority_params();
 #ifndef SLURM_14_11_PROTOCOL_VERSION
 	if (prio_params && strcmp(prio_params, "not_patched") == 0) {
-info("NOT PATCHED %s", prio_params);//TODO DEL
+		info("OStrich: No patch detected, using alternative configuration method");
 		/* 'fix' in versions without 'PriorityParameters'
 		 * calc_period is in minutes, we need seconds for interval
 		 * priority_decay is minutes, same as threshold
@@ -378,9 +378,7 @@ info("NOT PATCHED %s", prio_params);//TODO DEL
 		threshold = slurm_get_priority_decay_hl();
 		mode = MODE_FLAG_NO_ASSOC;
 	} else {
-info("PATCHED");
-if (prio_params == NULL) info("BUT EMPTY");
-else info("HERE %s", prio_params);
+		info("OStrich: Using patch with PriorityParameters");
 		/* from PriorityParameters:
 		 * interval is in seconds, threshold in minutes */
 		if (prio_params && (tmp_ptr=strstr(prio_params, "interval=")))
@@ -1132,12 +1130,11 @@ extern List priority_p_get_priority_factors_list(
 	return(list_create(NULL));
 }
 
+/* This code is copied from priority/basic to maintain 
+ * valid values of 'grp_used_cpu_run_secs'
+ */
 extern void priority_p_job_end(struct job_record *job_ptr)
 {
-	// TODO DOUBLE CHECK JAKIE SA LOCKI, CZY POTRZEBA JEDNAK MUTEXA??
-	return;
-
-	//TODO
 	uint64_t unused_cpu_run_secs = 0;
 	uint64_t time_limit_secs = (uint64_t)job_ptr->time_limit * 60;
 	slurmdb_association_rec_t *assoc_ptr;

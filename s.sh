@@ -39,6 +39,7 @@ if [ "$1" = "startup" ] || [ "$1" = "reset" ]; then
     cp -r ${BRANCH}/* ${SLURM_VER}/
 
     cd $SLURM_VER
+    patch -p1 < ../0001-priority-plugin-support-14.03.patch
     ./autogen.sh || exit 1
     ./configure --prefix=$APP_ROOT --enable-multiple-slurmd --without-munge --with-ssl
     make -s
