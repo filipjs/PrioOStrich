@@ -2,23 +2,7 @@ Tutorial:
 1) TODO
 
 
-Required SLURM support (checked as of 14.03):
-1) finished jobs won't be deleted before reading final data
-	- configuration parameter 'MinJobAge'
-2) jobs are removed on partition removal / partition name change
-	- OK
-3) "priority_p_set" calls inside slurmctld_lock_t (write jobs)
-	- OK
-4) not finished jobs have valid "details" pointer
-	- OK
-5) each job_update triggers a call to "priority_p_set"
-	- OK
-6) time limit/account of running jobs cannot be increased/changed
-	- OK (only SlurmUser can do it)
-7) priority_array must be created manually
-	- OK (build in plugin, destroyed in job_update)
-8) prio_factors aren't altered outside of plugin
-	- OK
+
 
 
 TODO:
@@ -34,9 +18,32 @@ TODO:
 - sprawdzic czy dziala 'static prio' przy rezerwacjach
 
 
-
-qos->usage->grp_used_cpu_run_secs
 qos->usage->grp_used_wall += run_decay;
 qos->usage->usage_raw += (long double)real_decay;
 
 // to samo jest w assoc -> az do root
+
+assoc not working 
+GrpWall= The maximum wall clock time any job submitted to this group can run for. If this limit is reached submission requests will be denied. 
+MaxWallDurationPerJob= The maximum wall clock time any job submitted to this association can run for. If this limit is reached the job will be denied at submission. 
+
+assoc working
+GrpCPUMins=
+
+
+qos not working
+GrpWall Wall clock limit for all jobs running with this QOS.
+MaxWallDurationPerJob 
+
+EnforceUsageThreshold If set, and the QOS also has a UsageThreshold, any jobs submitted with this QOS that fall below the UsageThreshold will be held until their Fairshare Usage goes above the Threshold. 
+
+UsageFactor Usage factor when running with this QOS (i.e. .5 would make it use only half the time as normal in accounting and 2 would make it use twice as much.)
+UsageThreshold A float representing the lowest fairshare of an association allowable to run a job. If an association falls below this threshold and has pending jobs or submits new jobs those jobs will be held until the usage goes back above the threshold. Use sshare to see current shares on the system. 
+
+http://slurm.schedmd.com/qos.html
+
+
+qos working
+GrpCPUMins
+
+qos priority doesnt work

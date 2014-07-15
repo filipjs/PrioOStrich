@@ -1,0 +1,18 @@
+
+Required SLURM support (checked as of 14.03):
+1) finished jobs won't be deleted before reading final data
+	- configuration parameter 'MinJobAge'
+2) jobs are removed on partition removal / partition name change
+	- OK
+3) "priority_p_set" calls inside slurmctld_lock_t (write jobs)
+	- OK
+4) not finished jobs have valid "details" pointer
+	- OK
+5) each job_update triggers a call to "priority_p_set"
+	- OK
+6) time limit/account of running jobs cannot be increased/changed
+	- OK (only SlurmUser can do it)
+7) priority_array must be created manually
+	- OK (build in plugin, destroyed in job_update)
+8) prio_factors aren't altered outside of plugin
+	- OK
