@@ -56,6 +56,29 @@ char *slurm_get_priority_params(void) { return "not_patched"; }
 #endif
 
 
+/* These are defined here so when we link with something other than
+ * the slurmctld we will have these symbols defined.  They will get
+ * overwritten when linking with the slurmctld.
+ */
+#if defined (__APPLE__)
+void *acct_db_conn  __attribute__((weak_import)) = NULL;
+uint32_t cluster_cpus __attribute__((weak_import)) = NO_VAL;
+List job_list  __attribute__((weak_import)) = NULL;
+List part_list __attribute__((weak_import)) = NULL;
+slurm_ctl_conf_t slurmctld_conf __attribute__((weak_import));
+#else
+void *acct_db_conn = NULL;
+uint32_t cluster_cpus = NO_VAL;
+List job_list = NULL;
+List part_list = NULL;
+slurm_ctl_conf_t slurmctld_conf;
+#endif
+
+
+/*
+ * These variables are required by the generic plugin interface.  If they
+ * are not found in the plugin, the plugin loader will ignore it.
+ */
 const char plugin_name[]       	= "Priority OSTRICH plugin";
 const char plugin_type[]       	= "priority/ostrich";
 const uint32_t plugin_version	= 100;
@@ -442,7 +465,7 @@ static void _load_config(void)
 		priority_debug = 1;
 	else
 		priority_debug = 0;
-	
+
 	sched_type = slurm_get_sched_type();
 	if (strcmp(sched_type, "sched/builtin") &&
 	    strcmp(sched_type, "sched/backfill"))
@@ -1032,6 +1055,10 @@ int init ( void )
 {
 	pthread_attr_t attr;
 
+	/* This means we aren't running from the controller so skip setup. */
+	if (cluster_cpus == NO_VAL)
+		return SLURM_SUCCESS;
+
 	verbose("OStrich: plugin loaded");
 
 	pthread_mutex_lock(&thread_flag_lock);
@@ -1095,6 +1122,7 @@ extern uint32_t priority_p_set(uint32_t last_prio, struct job_record *job_ptr)
 extern void priority_p_reconfig(bool assoc_clear)
 {
 	config_flag = true;
+	debug2("OStrich: plugin reconfigured");
 	return;
 }
 
