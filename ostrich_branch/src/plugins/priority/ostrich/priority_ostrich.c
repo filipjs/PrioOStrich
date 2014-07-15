@@ -268,7 +268,8 @@ static int _list_remove_finished(struct job_record *job_ptr, void *no_data)
 }
 
 /*********************** implementation ***********************/
-static void _print_debug_info(struct job_record *job_ptr, uint32_t camp_id)
+static void _print_debug_info(struct job_record *job_ptr, uint32_t camp_id,
+			       struct ostrich_user *user)
 {
 	time_t begin = job_ptr->start_time;
 	int pred_cpus = -1;
@@ -279,9 +280,9 @@ static void _print_debug_info(struct job_record *job_ptr, uint32_t camp_id)
 	}
 
 	verbose("OStrich Log: Job finished: %d %d %d %d %ld %ld %d %d %d %d %s",
+		user->id,
+		user->type_flag,
 		job_ptr->job_id,
-		job_ptr->user_id,
-		job_ptr->assoc_id,
 		camp_id,
 		begin,					/* begin time */
 		job_ptr->start_time - begin,		/* wait time */
@@ -344,8 +345,21 @@ static uint32_t _linear_resources(struct job_record *job_ptr)
 
 static uint32_t _cons_resources(struct job_record *job_ptr)
 {
-	//TODO better estimate based on "select type"
-	return job_ptr->details->cpus_per_task;
+	//TODO can be better?
+	uint32_t job_size_nodes, job_size_cpus;
+	
+	if (job_ptr->details->min_nodes == NO_VAL)
+		job_size_nodes = 1;
+	else
+		job_size_nodes = job_ptr->details->min_nodes;
+	
+	if (job_ptr->details->min_cpus == NO_VAL)
+		job_size_cpus = 1;
+	else
+		job_size_cpus = job_ptr->details->min_cpus;
+	// TODO jak nie jest shared to wtedy zamiast per_task dac per_node?
+	return MAX(job_size_cpus,
+		   job_size_nodes * job_ptr->details->cpus_per_task);
 }
 
 /* _is_job_modified - check if the job was modified since the last iteration */
@@ -764,8 +778,8 @@ static int _update_camp_workload(struct ostrich_user *user,
 				/* Use real time. */
 				camp->completed_time += job_runtime * job_cpus;
 
-				_print_debug_info(job_ptr, camp->id); //TODO REMOVE LATER
- 
+				_print_debug_info(job_ptr, camp->id, user); //TODO REMOVE LATER
+
 				list_remove(job_iter);
 				continue;
 			}
