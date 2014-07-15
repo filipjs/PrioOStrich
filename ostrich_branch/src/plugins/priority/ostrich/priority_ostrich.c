@@ -268,6 +268,31 @@ static int _list_remove_finished(struct job_record *job_ptr, void *no_data)
 }
 
 /*********************** implementation ***********************/
+static void _print_debug_info(struct job_record *job_ptr, uint32_t camp_id)
+{
+	time_t begin = job_ptr->start_time;
+	int pred_cpus = -1;
+
+	if (job_ptr->details) {
+		begin = job_ptr->details->begin_time;
+		pred_cpus = _job_resources(job_ptr);
+	}
+
+	verbose("OStrich Log: Job finished: %d %d %d %d %ld %ld %d %d %d %d %s",
+		job_ptr->job_id,
+		job_ptr->user_id,
+		job_ptr->assoc_id,
+		camp_id,
+		begin,					/* begin time */
+		job_ptr->start_time - begin,		/* wait time */
+		_job_real_runtime(job_ptr),		/* run time */
+		_job_pred_runtime(job_ptr),		/* predicted run time */
+		job_ptr->total_cpus,			/* cpu count */
+		pred_cpus,				/* predicted cpu count */
+		job_state_string(job_ptr->job_state)	/* job state */
+	);
+}
+
 static struct ostrich_schedule *_find_schedule(char *name)
 {
 	return list_find_first(ostrich_sched_list,
@@ -739,9 +764,7 @@ static int _update_camp_workload(struct ostrich_user *user,
 				/* Use real time. */
 				camp->completed_time += job_runtime * job_cpus;
 
-// TODO
-// 				if (DEBUG_FLAG)
-// 					_print_finished_job(job_ptr, camp->camp_id);
+				_print_debug_info(job_ptr, camp->id); //TODO REMOVE LATER
  
 				list_remove(job_iter);
 				continue;
