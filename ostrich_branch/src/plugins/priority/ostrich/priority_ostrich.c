@@ -51,7 +51,8 @@
  * Detect if priority plugin support patch is present in versions < 14.11
  */
 #ifndef SLURM_14_11_PROTOCOL_VERSION
-char *slurm_get_priority_params(void) __attribute__((weak_import));
+// char *slurm_get_priority_params(void);// __attribute__((weak_import));
+// TODO CZY TEN WEAK IMPORT JEST POTRZEBNY W APPLE I WTEDY TREBA SPRAWDZAC CZY FUNKCJA == NULL??
 char *slurm_get_priority_params(void) { return "not_patched"; }
 #endif
 
@@ -79,7 +80,7 @@ slurm_ctl_conf_t slurmctld_conf;
  * These variables are required by the generic plugin interface.  If they
  * are not found in the plugin, the plugin loader will ignore it.
  */
-const char plugin_name[]       	= "Priority OSTRICH plugin";
+const char plugin_name[]       	= "Priority OStrich plugin";
 const char plugin_type[]       	= "priority/ostrich";
 const uint32_t plugin_version	= 100;
 
@@ -426,11 +427,11 @@ static void _load_config(void)
 #endif
 
 	if (schedule_interval < 1)
-		fatal("OStrich: invalid interval: %d", schedule_interval);
+		fatal("OStrich: Invalid interval: %d", schedule_interval);
 	if (threshold < 60)
-		fatal("OStrich: invalid threshold: %d", threshold);
+		fatal("OStrich: Invalid threshold: %d", threshold);
 	if (mode > 1)
-		fatal("OStrich: invalid mode: %d", mode);
+		fatal("OStrich: Invalid mode: %d", mode);
 
 	if (slurm_get_priority_favor_small())
 		favor_small = true;
@@ -469,16 +470,16 @@ static void _load_config(void)
 	sched_type = slurm_get_sched_type();
 	if (strcmp(sched_type, "sched/builtin") &&
 	    strcmp(sched_type, "sched/backfill"))
-		fatal("OStrich: supports only sched/builtin or sched/backfill");
+		fatal("OStrich: Supports only sched/builtin or sched/backfill");
 	xfree(sched_type);
 
 	preempt_type = slurm_get_preempt_type();
 	if (strcmp(preempt_type, "preempt/none"))
-		fatal("OStrich: supports only preempt/none");
+		fatal("OStrich: Supports only preempt/none");
 	xfree(preempt_type);
 
 	if (slurm_get_preempt_mode() != PREEMPT_MODE_OFF)
-		fatal("OStrich: supports only PreemptMode=OFF");
+		fatal("OStrich: Supports only PreemptMode=OFF");
 
 	req_job_age = 4 * schedule_interval;
 	if (slurmctld_conf.min_job_age > 0 && slurmctld_conf.min_job_age < req_job_age)
@@ -567,7 +568,7 @@ static void _place_waiting_job(struct job_record *job_ptr, char *part_name)
 			key.user_id = job_ptr->assoc_id;
 			key.user_type = TYPE_FLAG_ASSOC;
 		} else {
-			error("OStrich: skipping job %d, no account association",
+			error("OStrich: Skipping job %d, no account association",
 			      job_ptr->job_id);
 			job_ptr->state_reason = FAIL_ACCOUNT;
 			return;
@@ -626,7 +627,7 @@ static void _manage_incoming_jobs(void)
 		} else if (job_ptr->part_ptr) {
 			_place_waiting_job(job_ptr, job_ptr->part_ptr->name);
 		} else {
-			error("OStrich: skipping job %d, no partition specified",
+			error("OStrich: Skipping job %d, no partition specified",
 			      job_ptr->job_id);
 			job_ptr->state_reason = FAIL_DOWN_PARTITION;
 		}
@@ -1029,8 +1030,8 @@ static void *_ostrich_agent(void *no_data)
 		//TODO USUWANIE OSTRICH_USER JESLI INACTIVE PRZEZ DLUGI CZAS???
 		unlock_slurmctld(all_locks);
 
-		END_TIMER2("OStrich: agent thread");
-		debug2("OStrich: schedule iteration %s", TIME_STR);
+		END_TIMER2("OStrich: Agent thread");
+		debug2("OStrich: Schedule iteration %s", TIME_STR);
 	}
 	/* Cleanup. */
 	list_destroy(ostrich_sched_list);
@@ -1059,11 +1060,11 @@ int init ( void )
 	if (cluster_cpus == NO_VAL)
 		return SLURM_SUCCESS;
 
-	verbose("OStrich: plugin loaded");
+	verbose("OStrich: Plugin loaded");
 
 	pthread_mutex_lock(&thread_flag_lock);
 	if (ostrich_thread) {
-		debug2("OStrich: priority thread already running, "
+		debug2("OStrich: Priority thread already running, "
 			"not starting another");
 		pthread_mutex_unlock(&thread_flag_lock);
 		return SLURM_ERROR;
@@ -1071,7 +1072,7 @@ int init ( void )
 
 	slurm_attr_init(&attr);
 	if (pthread_create(&ostrich_thread, &attr, _ostrich_agent, NULL))
-		fatal("OStrich: unable to start priority thread");
+		fatal("OStrich: Unable to start priority thread");
 	slurm_attr_destroy(&attr);
 
 	pthread_mutex_unlock(&thread_flag_lock);
@@ -1080,7 +1081,7 @@ int init ( void )
 
 int fini ( void )
 {
-	verbose("OStrich: plugin shutting down");
+	verbose("OStrich: Plugin shutting down");
 
 	pthread_mutex_lock(&thread_flag_lock);
 	if (ostrich_thread) {
@@ -1122,7 +1123,7 @@ extern uint32_t priority_p_set(uint32_t last_prio, struct job_record *job_ptr)
 extern void priority_p_reconfig(bool assoc_clear)
 {
 	config_flag = true;
-	debug2("OStrich: plugin reconfigured");
+	debug2("OStrich: Plugin reconfigured");
 	return;
 }
 
