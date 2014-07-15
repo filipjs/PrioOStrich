@@ -910,9 +910,12 @@ static void _assign_priorities(struct ostrich_schedule *sched)
 					/* This is the 'main' partition of the job */
 					job_ptr->priority = prio;
 
+					job_ptr->prio_factors->priority_age = 0;
 					job_ptr->prio_factors->priority_fs = fs_prio;
 					job_ptr->prio_factors->priority_js = js_prio;
 					job_ptr->prio_factors->priority_part = sched->priority;
+					job_ptr->prio_factors->priority_qos = 0;
+					job_ptr->prio_factors->nice = NICE_OFFSET;
 				}
 
 				_set_array_prio(job_ptr, prio, sched);
@@ -1123,15 +1126,132 @@ extern double priority_p_calc_fs_factor(long double usage_efctv,
 	return 0;
 }
 
+/* This code is copied from priority/multifactor (v14.03) to enable
+ * the use of the 'sprio' command.
+ */
+static int _filter_job(struct job_record *job_ptr, List req_job_list,
+		       List req_user_list)
+{
+	int filter = 0;
+	ListIterator iterator;
+	uint32_t *job_id;
+	uint32_t *user_id;
+
+	if (req_job_list) {
+		filter = 1;
+		iterator = list_iterator_create(req_job_list);
+		while ((job_id = list_next(iterator))) {
+			if (*job_id == job_ptr->job_id) {
+				filter = 0;
+				break;
+			}
+		}
+		list_iterator_destroy(iterator);
+		if (filter == 1) {
+			return 1;
+		}
+	}
+
+	if (req_user_list) {
+		filter = 1;
+		iterator = list_iterator_create(req_user_list);
+		while ((user_id = list_next(iterator))) {
+			if (*user_id == job_ptr->user_id) {
+				filter = 0;
+				break;
+			}
+		}
+		list_iterator_destroy(iterator);
+		if (filter == 1)
+			return 1;
+	}
+
+	return filter;
+}
+
+/* This code is copied from priority/multifactor (v14.03) to enable 
+ * the use of the 'sprio' command.
+ */
 extern List priority_p_get_priority_factors_list(
 	priority_factors_request_msg_t *req_msg, uid_t uid)
 {
-	// TODO DOUBLE CHECK JAKIE SA LOCKI, CZY POTRZEBA JEDNAK MUTEXA??
-	return(list_create(NULL));
+	List req_job_list;
+	List req_user_list;
+	List ret_list = NULL;
+	ListIterator itr;
+	priority_factors_object_t *obj = NULL;
+	struct job_record *job_ptr = NULL;
+	time_t start_time = time(NULL);
+
+	xassert(req_msg);
+	req_job_list = req_msg->job_id_list;
+	req_user_list = req_msg->uid_list;
+
+	/* Read lock on jobs, nodes, and partitions */
+	slurmctld_lock_t job_read_lock =
+		{ NO_LOCK, READ_LOCK, READ_LOCK, READ_LOCK };
+
+	lock_slurmctld(job_read_lock);
+	if (job_list && list_count(job_list)) {
+		ret_list = list_create(slurm_destroy_priority_factors_object);
+		itr = list_iterator_create(job_list);
+		while ((job_ptr = list_next(itr))) {
+			/*
+			 * We are only looking for pending jobs
+			 */
+			if (!IS_JOB_PENDING(job_ptr))
+				continue;
+
+			/*
+			 * This means the job is not eligible yet
+			 */
+			if (!job_ptr->details->begin_time
+			    || (job_ptr->details->begin_time > start_time))
+				continue;
+
+			/*
+			 * 0 means the job is held
+			 */
+			if (job_ptr->priority == 0)
+				continue;
+
+			/*
+			 * Priority has been set elsewhere (e.g. by SlurmUser)
+			 */
+			if (job_ptr->direct_set_prio)
+				continue;
+
+			if (_filter_job(job_ptr, req_job_list, req_user_list))
+				continue;
+
+			if ((slurmctld_conf.private_data & PRIVATE_DATA_JOBS)
+			    && (job_ptr->user_id != uid)
+			    && !validate_operator(uid)
+			    && !assoc_mgr_is_user_acct_coord(
+				    acct_db_conn, uid,
+				    job_ptr->account))
+				continue;
+
+			obj = xmalloc(sizeof(priority_factors_object_t));
+			memcpy(obj, job_ptr->prio_factors,
+			       sizeof(priority_factors_object_t));
+			obj->job_id = job_ptr->job_id;
+			obj->user_id = job_ptr->user_id;
+			list_append(ret_list, obj);
+		}
+		list_iterator_destroy(itr);
+		if (!list_count(ret_list)) {
+			list_destroy(ret_list);
+			ret_list = NULL;
+		}
+	}
+	unlock_slurmctld(job_read_lock);
+
+	return ret_list;
 }
 
-/* This code is copied from priority/basic to maintain 
- * valid values of 'grp_used_cpu_run_secs'
+/* This code is copied from priority/basic (v14.03) to maintain 
+ * valid values of 'grp_used_cpu_run_secs'.
  */
 extern void priority_p_job_end(struct job_record *job_ptr)
 {
