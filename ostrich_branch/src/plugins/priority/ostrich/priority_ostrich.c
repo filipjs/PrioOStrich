@@ -114,7 +114,6 @@ struct ostrich_user {
 
 struct ostrich_campaign {
 	uint32_t id;
-	uint32_t priority;
 	struct ostrich_user *owner;
 
 	uint32_t time_offset;		/* time needed to complete previous campaigns */
@@ -314,21 +313,14 @@ static uint32_t _serial_resources(struct job_record *job_ptr)
 
 static uint32_t _linear_resources(struct job_record *job_ptr)
 {
-	if (IS_JOB_STARTED(job_ptr))
-		return job_ptr->total_cpus;
-	else
-		// TODO 
-		return 1;
+	// TODO 
+	return 1;
 }
 
 static uint32_t _cons_resources(struct job_record *job_ptr)
 {
-	if (IS_JOB_STARTED(job_ptr))
-		return job_ptr->total_cpus;
-	else
-		/* pending, give an estimate */
-		//TODO better estimate based on "select type"
-		return job_ptr->details->cpus_per_task;
+	//TODO better estimate based on "select type"
+	return job_ptr->details->cpus_per_task;
 }
 
 /* _is_job_modified - check if the job was modified since the last iteration */
@@ -411,7 +403,6 @@ static void _load_config(void)
 			threshold = atoi(tmp_ptr + 10) * 60;
 		if (prio_params && (tmp_ptr=strstr(prio_params, "mode=")))
 			mode = atoi(tmp_ptr + 5);
-
 		xfree(prio_params);
 	}
 #else
@@ -524,11 +515,12 @@ static void _update_struct(void)
 		}
 		/* Set/update priority. */
 		sched->priority = part_ptr->priority;
-		/* Set/update max_time. */
+		/* Set/update max_time. 
+		 * Values are in minutes, change to seconds. */
 		if (part_ptr->max_time == NO_VAL || part_ptr->max_time == INFINITE)
-			sched->max_time = DEFAULT_PART_LIMIT;
+			sched->max_time = DEFAULT_PART_LIMIT * 60;
 		else
-			sched->max_time = part_ptr->max_time;
+			sched->max_time = part_ptr->max_time * 60;
 		/* Set/update average cpu count. */
 		if (part_ptr->total_nodes >= part_ptr->total_cpus)
 			sched->cpus_pn = 1;
@@ -668,7 +660,6 @@ static int _manage_waiting_jobs(struct ostrich_user *user,
 			camp = xmalloc(sizeof(struct ostrich_campaign));
 
 			camp->id = ++user->last_camp_id;
-			camp->priority = 0;
 			camp->owner = user;
 
 			camp->time_offset = 0;
@@ -691,7 +682,6 @@ static int _manage_waiting_jobs(struct ostrich_user *user,
 					      &(job_ptr->job_id));
 			if (!dup)
 				list_append(camp->jobs, job_ptr);
-
 			/* Advance to the next job. */
 			list_remove(job_iter);
 			job_ptr = (struct job_record *) list_next(job_iter);
@@ -705,7 +695,7 @@ static int _manage_waiting_jobs(struct ostrich_user *user,
 	}
 	/* Note: if a remaining job from the waiting list is updated,
 	 * it will be re-introduced to the system. 
-	 * There is no need to validate it.
+	 * There is no need to validate them.
 	 */
 	list_iterator_destroy(camp_iter);
 	list_iterator_destroy(job_iter);
@@ -716,7 +706,7 @@ static int _manage_waiting_jobs(struct ostrich_user *user,
  * 	Count the number of active cpus in the partition.
  */
 static int _update_camp_workload(struct ostrich_user *user,
-				 struct ostrich_schedule *sched)
+				  struct ostrich_schedule *sched)
 {
 	struct ostrich_campaign *camp;
 	struct job_record *job_ptr;
@@ -732,10 +722,18 @@ static int _update_camp_workload(struct ostrich_user *user,
 
 		while ((job_ptr = (struct job_record *) list_next(job_iter))) {
 
-			job_cpus = _job_resources(job_ptr);
+			if (IS_JOB_STARTED(job_ptr))
+				/* True value calculated by Slurm. */
+				job_cpus = job_ptr->total_cpus;
+			else
+				/* Estimate for pending jobs. */
+				job_cpus = _job_resources(job_ptr);
+
 			job_runtime = _job_real_runtime(job_ptr);
-			job_time_limit = MIN(_job_pred_runtime(job_ptr),
-					     sched->max_time);
+			job_time_limit = _job_pred_runtime(job_ptr);
+			/* However a job cannot run longer than the partition limit. */
+			job_time_limit = MIN(job_time_limit, sched->max_time);
+
 			/* Remove finished jobs. */
 			if (IS_JOB_FINISHED(job_ptr)) {
 				/* Use real time. */
@@ -925,7 +923,7 @@ static void _assign_priorities(struct ostrich_schedule *sched)
 						xmalloc(sizeof(priority_factors_object_t));
 
 				if (job_ptr->part_ptr &&
-				strcmp(job_ptr->part_ptr->name, sched->part_name) == 0) {
+				    strcmp(job_ptr->part_ptr->name, sched->part_name) == 0) {
 					/* This is the 'main' partition of the job */
 					job_ptr->priority = prio;
 
@@ -938,8 +936,8 @@ static void _assign_priorities(struct ostrich_schedule *sched)
 				}
 
 				_set_array_prio(job_ptr, prio, sched);
-				js_prio--;
 			}
+			js_prio--;
 		}
 		list_iterator_destroy(job_iter);
 	}
@@ -990,9 +988,9 @@ static void *_ostrich_agent(void *no_data)
 
 		time_skipped = difftime(time(NULL), last_sched_time);
 		last_sched_time = time(NULL);
-		
+
 		iter = list_iterator_create(ostrich_sched_list);
-		
+
 		while ((sched = (struct ostrich_schedule *) list_next(iter))) {
 
 			list_for_each(sched->users,
@@ -1006,6 +1004,8 @@ static void *_ostrich_agent(void *no_data)
 				      (ListForF) _update_camp_workload,
 				      sched);
 
+			/* Always pretend to use at least one CPU 
+			 * to account for time counting errors. */
 			sched->working_cpus = MAX(sched->working_cpus, 1);
 
 			if (sched->total_shares > 0) {
@@ -1027,7 +1027,7 @@ static void *_ostrich_agent(void *no_data)
 		}
 
 		list_iterator_destroy(iter);
-		//TODO USUWANIE OSTRICH_USER JESLI INACTIVE PRZEZ DLUGI CZAS???
+		//TODO USUWANIE OSTRICH_USER JESLI INACTIVE PRZEZ DLUGI CZAS??
 		unlock_slurmctld(all_locks);
 
 		END_TIMER2("OStrich: Agent thread");
@@ -1112,7 +1112,7 @@ extern uint32_t priority_p_set(uint32_t last_prio, struct job_record *job_ptr)
 
 	if (job_ptr->direct_set_prio)
 		return job_ptr->priority;
-	
+
 	if (job_ptr->resv_id)
 		return resv_queue--;
 
