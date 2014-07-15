@@ -546,7 +546,7 @@ static void _place_waiting_job(struct job_record *job_ptr, char *part_name)
 		} else {
 			error("OStrich: skipping job %d, no account association",
 			      job_ptr->job_id);
-			// TODO JOB_PRIO = 0 I JAKIS REASON??
+			job_ptr->state_reason = FAIL_ACCOUNT;
 			return;
 		}
 	} else {  // no assoc mode
@@ -575,8 +575,6 @@ static void _place_waiting_job(struct job_record *job_ptr, char *part_name)
 
 		list_append(sched->users, user);
 	}
-info("DODALEM PRACE %d DO USERA %d %d",
-     job_ptr->job_id, user->id, user->type_flag);
 
 	/* Set/update normalized share. */
 	if (user->type_flag == TYPE_FLAG_ASSOC) {
@@ -607,7 +605,7 @@ static void _manage_incoming_jobs(void)
 		} else {
 			error("OStrich: skipping job %d, no partition specified",
 			      job_ptr->job_id);
-			// TODO JOB_PRIO = 0 I JAKIS REASON??
+			job_ptr->state_reason = FAIL_DOWN_PARTITION;
 		}
 	}
 }
@@ -669,8 +667,7 @@ static int _manage_waiting_jobs(struct ostrich_user *user,
 					      &(job_ptr->job_id));
 			if (!dup)
 				list_append(camp->jobs, job_ptr);
-			else
-info("JOB %d DUPLICATE", job_ptr->job_id);
+
 			/* Advance to the next job. */
 			list_remove(job_iter);
 			job_ptr = (struct job_record *) list_next(job_iter);
@@ -730,8 +727,6 @@ static int _update_camp_workload(struct ostrich_user *user,
 			/* Validate the job */
 			if (_is_job_modified(job_ptr, camp, user, sched)) {
 				list_remove(job_iter);
-info("USUWAM PRACE %d USER %d %d",
-     job_ptr->job_id, user->id, user->type_flag);
 				continue;
 			}
 			/* Note: if a job is updated, it will be re-introduced to the system. 
@@ -968,7 +963,7 @@ static void *_ostrich_agent(void *no_data)
 
 		_update_struct();
 		_manage_incoming_jobs();
-debug("0");
+
 		time_skipped = difftime(time(NULL), last_sched_time);
 		last_sched_time = time(NULL);
 		
@@ -979,14 +974,14 @@ debug("0");
 			list_for_each(sched->users,
 				      (ListForF) _manage_waiting_jobs,
 				      sched);
-debug("1");
+
 			prev_allocated = sched->working_cpus;
 			sched->working_cpus = 0;
 			
 			list_for_each(sched->users,
 				      (ListForF) _update_camp_workload,
 				      sched);
-debug("2");
+
 			sched->working_cpus = MAX(sched->working_cpus, 1);
 
 			if (sched->total_shares > 0) {
@@ -996,7 +991,6 @@ debug("2");
 				list_for_each(sched->users,
 					      (ListForF) _distribute_time,
 					      &time_skipped);
-debug("2a");
 			}
 
 			sched->total_shares = 0;
@@ -1004,16 +998,15 @@ debug("2a");
 			list_for_each(sched->users,
 				      (ListForF) _update_user_activity,
 				      sched);
-debug("3");
+
 			_assign_priorities(sched);
-debug("end");
 		}
 
 		list_iterator_destroy(iter);
 		//TODO USUWANIE OSTRICH_USER JESLI INACTIVE PRZEZ DLUGI CZAS???
 		unlock_slurmctld(all_locks);
 
-		END_TIMER2("OStrich: ostrich_agent");
+		END_TIMER2("OStrich: agent thread");
 		debug2("OStrich: schedule iteration %s", TIME_STR);
 	}
 	/* Cleanup. */
@@ -1083,16 +1076,6 @@ int fini ( void )
 extern uint32_t priority_p_set(uint32_t last_prio, struct job_record *job_ptr)
 {
 	static int resv_queue = 100000000;
-
-info("WELCOME JOB %d with details = %d, resv = %d, acc(?) = %s", 
-     job_ptr->job_id, job_ptr->details != NULL,
-	job_ptr->resv_id, job_ptr->account
-);
-if (job_ptr->assoc_ptr)
-	info("YES ASSOC %d %lf", job_ptr->assoc_id, 
-	     ((slurmdb_association_rec_t *) job_ptr->assoc_ptr)->usage->shares_norm);
-else
-	info("NIE MA ASSOC");
 
 	if (job_ptr->priority_array)
 		xfree(job_ptr->priority_array);
