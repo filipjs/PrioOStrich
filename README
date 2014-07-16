@@ -6,44 +6,48 @@ Tutorial:
 
 
 TODO:
-- jesli nie ma enforce_part wtedy 'failed' prace sa wlaczane do kampani
+- jesli nie ma enforce_part wtedy 'failed' prace sa wlaczane do kampani  | moze te prace po 'state_reason' rozpoznawac??
 
 - job update bedzie ustawial prio na 0/1.. nie zmieniac prio po updacie??
 
-- sprwdzic overflow, szczegolnie przy TIME * CPUS i wszedzie gdzie jest DOUBLE
-  - sprawdzic dzielania przez double (aka czy nie ma gdzies przez 0)
+- maksymalne wartosci TIME * CPUS?
 
-- QOS_FLAG_ENFORCE_USAGE_THRES - ta flaga nie moze byc wlaczona [qos_ptr->flags], TODO SPRAWDZIC INNE
+- wypisywac wiecej info przy debug_flag?
 
-- sprawdzic czy dziala 'static prio' przy rezerwacjach
-
-
-qos->usage->grp_used_wall += run_decay;
-qos->usage->usage_raw += (long double)real_decay;
-
-// to samo jest w assoc -> az do root
 
 assoc not working 
-GrpWall= The maximum wall clock time any job submitted to this group can run for. If this limit is reached submission requests will be denied. 
-MaxWallDurationPerJob= The maximum wall clock time any job submitted to this association can run for. If this limit is reached the job will be denied at submission. 
-
-assoc working
-GrpCPUMins=
-
+GrpWall
 
 qos not working
-GrpWall Wall clock limit for all jobs running with this QOS.
-MaxWallDurationPerJob 
+GrpWall
+EnforceUsageThreshold 
+UsageFactor 
+UsageThreshold 
 
-EnforceUsageThreshold If set, and the QOS also has a UsageThreshold, any jobs submitted with this QOS that fall below the UsageThreshold will be held until their Fairshare Usage goes above the Threshold. 
-
-UsageFactor Usage factor when running with this QOS (i.e. .5 would make it use only half the time as normal in accounting and 2 would make it use twice as much.)
-UsageThreshold A float representing the lowest fairshare of an association allowable to run a job. If an association falls below this threshold and has pending jobs or submits new jobs those jobs will be held until the usage goes back above the threshold. Use sshare to see current shares on the system. 
+qos priority
 
 http://slurm.schedmd.com/qos.html
 
+napisac jak interpretowac sprio
+dac link do ostrish
+tylko wersje >= 14.03
 
-qos working
-GrpCPUMins
+proces instalacji
+znaczenie opcji
+opcje bez patcha
 
-qos priority doesnt work
+wytlumaczenie partition prio
+
+bez patcha nie dziala sprio / + shares_norm
+z patchem nie dziala scontrol show config (TYLKO, reconfigure dziala)
+
+przy mode == 0 (only assoc) musza byc assoc inaczej nie pojdzie praca
+zmiana mode / threshold nie dziala retroaktywnie, tylko na nowe prace
+shares_norm sa aktualizowane przy urucheminiu/update pracy
+
+
+job_scheduler.c BUG:
+		if (job_q_ptr->details->min_cpus == NO_VAL)
+			job_size_cpus = 1;
+		else
+			job_size_cpus = job_q_ptr->details->min_nodes (!);

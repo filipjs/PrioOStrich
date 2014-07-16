@@ -30,7 +30,7 @@
 #include "src/common/xstring.h"
 
 #define INTERVAL 10
-#define THRESHOLD 60 * 20
+#define THRESHOLD 60 * 30
 
 #define DEFAULT_PART_LIMIT 60 * 24 * 7
 #define DEFAULT_JOB_LIMIT  60 * 24 * 7 * 365
@@ -279,9 +279,10 @@ static void _print_debug_info(struct job_record *job_ptr, uint32_t camp_id,
 		pred_cpus = _job_resources(job_ptr);
 	}
 
-	verbose("OStrich Log: Job finished: %d %d %d %d %ld %ld %d %d %d %d %s",
+	verbose("OStrich Log: Job finished: %d %d %lf %d %d %ld %ld %d %d %d %d %s",
 		user->id,
 		user->type_flag,
+		user->norm_share,
 		job_ptr->job_id,
 		camp_id,
 		begin,					/* begin time */

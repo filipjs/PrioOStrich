@@ -103,7 +103,7 @@ elif [ "$1" = "patch" ]; then
 
     python clean.py
     cp -r ${BRANCH}/* ${AFTER}/
-    diff -Naur $BEFORE $AFTER > "ostrich_patch_"${SLURM_VER}
+    diff -Naur $BEFORE $AFTER > "ostrich-"${SLURM_VER}".patch"
 
     rm -rf $BEFORE $AFTER
 
