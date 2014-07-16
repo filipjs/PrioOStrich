@@ -1,53 +1,68 @@
-Tutorial:
-1) TODO
+wersja super skrocona i po polsku
+[prezentacja i opis algorytmu na na http://www.mimuw.edu.pl/~krzadca/ostrich/index.html]
+
+
+instalacja:
+  1) sciagnac cale repozytorium
+  2) uruchomic ./s.sh patch				-> to utworzy plik "ostrich-slurm-14.03.0.patch"
+  3) zaaplikowac ten patch do kodu slurma		-> patche tworzone aby dzialaly z "patch -p1"
+  4) (opcjonalnie) zaaplikowac "0001-priority-plugin-support-14.03.patch"
+  5) zmienic w konfigu PriorityType na "priority/ostrich"
+
+wersja z patchem 0001:
+  - trzeba podmienic cala instalacje slurma na ControlMashine
+  + plik konfiguracyjny obsluguje "PriorityParameters"
+  + dzialajace sprio
+  + mozliwosc pobierania wartosci "normalized shares" z bazy
+  - nie dziala komenda "./scontrol show config" wyslana z wezlow bez tego patcha
+        [wszystkie inne dzialaja, wlacznie z ./scontrol reconfigure]
+
+wersja bez patcha:
+  + po kompilacji wystarczy przekopiowac 3 pliki "priority_ostrich.a / .la / .so" do katalogu /lib/slurm/
+  - nie dziala "PriorityParameters"
+  - nie dziala sprio
+  - kazdy uzytkownik dostaje taki sam "share"
 
 
 
+parametry konfiguracyjne:
+  interval - czestotliwosc przeliczania priorytetow, kazda praca poczatkowo otrzymuje priorytet zero
+             (stan wstrzymiania), a docelowy dopiero przy nastepnej iteracji [w sekundach]
+  threshold - parametr do algorytmu, wplywa na grupowanie prac w kampanie [w minutach]
+  mode - tryb obslugi shares [0 == korzystaj z normalized shares, 1 == wszyscy po rowno]
+  PriorityFavorSmall - ta opcja jest aktywna i dziala podobnie jak w multifactor
+
+wersja z patchem 0001:
+  parametry podaje sie tak samo jak do "SchedulerParameters"
+  np. PriorityParameters=interval=10,threshold=30,mode=0 
+  (to sa wartosci domyslne jak sie nic nie ustawi, proponalbym moze na poczatek ich nie zmieniac)
+
+wersja bez patcha:
+  interval odczytywany jest poprzez opcje "PriorityCalcPeriod"
+  threshold odczytywany jest poprzez opcje "PriorityDecayHalfLife"
+  mode - ustawiony jest na "1" i nie da sie tego zmienic
 
 
-TODO:
-- jesli nie ma enforce_part wtedy 'failed' prace sa wlaczane do kampani  | moze te prace po 'state_reason' rozpoznawac??
 
-- job update bedzie ustawial prio na 0/1.. nie zmieniac prio po updacie??
-
-- maksymalne wartosci TIME * CPUS?
-
-- wypisywac wiecej info przy debug_flag?
+interpretacja sprio:
+  Fairshare - priorytet kampanii [zadania z tej samej kampanii beda mialy ten sam priorytet tutaj]
+  JobSize - priorytet zadania wewnatrz kampanii [o tym wlasnie decyduje opcja "PriorityFavorSmall"]
+  Partition - priorytet partycji
+  reszta pozycji jest obecnie nieuzywana 
 
 
-assoc not working 
-GrpWall
 
-qos not working
-GrpWall
-EnforceUsageThreshold 
-UsageFactor 
-UsageThreshold 
+ustawianie priorytetow partycji:
+  dziala to troche inaczej niz w multifactor, bo multifactor wszystko normalizuje
 
-qos priority
+  tutaj zadanie z najwyzszym priorytetem na danej partycji zawsze bedzie mialo prio = 500000,
+  nastepne 499999, nastepne 499998 itd.
+  do tych wartosci doliczany jest priorytet partycji, ale juz bez zadnych modyfikacji
 
-http://slurm.schedmd.com/qos.html
+  dla przykladu: mamy partycje A i B, obie pokrywaja te same wezly, A ma priorytet 0, B ma priorytet 10
 
-napisac jak interpretowac sprio
-dac link do ostrish
-tylko wersje >= 14.03
+  zatem pierwsze 10 zadan, ktore zostana wyslane na partycje B beda zawsze wykonane przed jakimkolwiek
+  zadaniem z partycji A [bo beda mialy priorytety 500010, 500009, ..., a najwyzsze z A bedzie mialo 500000]
 
-proces instalacji
-znaczenie opcji
-opcje bez patcha
-
-wytlumaczenie partition prio
-
-bez patcha nie dziala sprio / + shares_norm
-z patchem nie dziala scontrol show config (TYLKO, reconfigure dziala)
-
-przy mode == 0 (only assoc) musza byc assoc inaczej nie pojdzie praca
-zmiana mode / threshold nie dziala retroaktywnie, tylko na nowe prace
-shares_norm sa aktualizowane przy urucheminiu/update pracy
-
-
-job_scheduler.c BUG:
-		if (job_q_ptr->details->min_cpus == NO_VAL)
-			job_size_cpus = 1;
-		else
-			job_size_cpus = job_q_ptr->details->min_nodes (!);
+  w szczegolnosci, jesli roznica priorytetow partycji bedzie zblizona do liczby "resources",
+  ktore te partycje wspoldziela, to jedna z nich moze zostac zaglodzona

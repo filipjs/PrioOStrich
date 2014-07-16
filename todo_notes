@@ -1,0 +1,53 @@
+Tutorial:
+1) TODO
+
+
+
+
+
+TODO:
+- jesli nie ma enforce_part wtedy 'failed' prace sa wlaczane do kampani  | moze te prace po 'state_reason' rozpoznawac??
+
+- job update bedzie ustawial prio na 0/1.. nie zmieniac prio po updacie??
+
+- maksymalne wartosci TIME * CPUS?
+
+- wypisywac wiecej info przy debug_flag?
+
+
+assoc not working 
+GrpWall
+
+qos not working
+GrpWall
+EnforceUsageThreshold 
+UsageFactor 
+UsageThreshold 
+
+qos priority
+
+http://slurm.schedmd.com/qos.html
+
+napisac jak interpretowac sprio
+dac link do ostrish
+tylko wersje >= 14.03
+
+proces instalacji
+znaczenie opcji
+opcje bez patcha
+
+wytlumaczenie partition prio
+
+bez patcha nie dziala sprio / + shares_norm
+z patchem nie dziala scontrol show config (TYLKO, reconfigure dziala)
+
+przy mode == 0 (only assoc) musza byc assoc inaczej nie pojdzie praca
+zmiana mode / threshold nie dziala retroaktywnie, tylko na nowe prace
+shares_norm sa aktualizowane przy urucheminiu/update pracy
+
+
+job_scheduler.c BUG:
+		if (job_q_ptr->details->min_cpus == NO_VAL)
+			job_size_cpus = 1;
+		else
+			job_size_cpus = job_q_ptr->details->min_nodes (!);
