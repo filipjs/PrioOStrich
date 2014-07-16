@@ -293,6 +293,15 @@ static void _print_debug_info(struct job_record *job_ptr, uint32_t camp_id,
 		pred_cpus,				/* predicted cpu count */
 		job_state_string(job_ptr->job_state)	/* job state */
 	);
+	
+	if (job_ptr->details) 
+		verbose("OStrich Log: Job extra details: %d %d %d %d %d",
+			job_ptr->job_id,
+			job_ptr->details->share_res,
+			job_ptr->details->whole_node,
+			job_ptr->details->ntasks_per_node,
+			job_ptr->details->num_tasks
+		);
 }
 
 static struct ostrich_schedule *_find_schedule(char *name)
@@ -950,11 +959,12 @@ static void _assign_priorities(struct ostrich_schedule *sched)
 
 		job_iter = list_iterator_create(camp->jobs);
 		while ((job_ptr = (struct job_record *) list_next(job_iter))) {
-			if (!IS_JOB_RUNNING(job_ptr)) {
+			if (IS_JOB_PENDING(job_ptr) ||
+			    job_ptr->priority == 1) {
 
 				prio = fs_prio + js_prio + sched->priority;
-				if (prio < 1)
-					prio = 1;
+				if (prio < 2)
+					prio = 2;
 
 				if (!job_ptr->prio_factors)
 					job_ptr->prio_factors = 
@@ -1155,7 +1165,7 @@ extern uint32_t priority_p_set(uint32_t last_prio, struct job_record *job_ptr)
 		return resv_queue--;
 
 	list_enqueue(incoming_jobs, job_ptr);
-	return 0;
+	return 1;
 }
 
 extern void priority_p_reconfig(bool assoc_clear)

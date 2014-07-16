@@ -26,8 +26,7 @@ wersja bez patcha:
 
 
 parametry konfiguracyjne:
-  interval - czestotliwosc przeliczania priorytetow, kazda praca poczatkowo otrzymuje priorytet zero
-             (stan wstrzymiania), a docelowy dopiero przy nastepnej iteracji [w sekundach]
+  interval - czestotliwosc przeliczania priorytetow, kazda praca otrzymuje poczatkowo priorytet 1, a docelowy dopiero przy nastepnej iteracji [w sekundach]
   threshold - parametr do algorytmu, wplywa na grupowanie prac w kampanie [w minutach]
   mode - tryb obslugi shares [0 == korzystaj z normalized shares, 1 == wszyscy po rowno]
   PriorityFavorSmall - ta opcja jest aktywna i dziala podobnie jak w multifactor
