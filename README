@@ -6,6 +6,7 @@ instalacja:
   1) sciagnac cale repozytorium
   2) uruchomic ./s.sh patch				-> to utworzy plik "ostrich-slurm-14.03.0.patch"
   3) zaaplikowac ten patch do kodu slurma		-> patche tworzone aby dzialaly z "patch -p1"
+    ew. autoconf, automake zeby zbudowac cala menazerie autotools'ow
   4) (opcjonalnie) zaaplikowac "0001-priority-plugin-support-14.03.patch"
   5) zmienic w konfigu PriorityType na "priority/ostrich"
 
