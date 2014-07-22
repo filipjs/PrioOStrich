@@ -7,7 +7,9 @@ instalacja:
   2) uruchomic ./s.sh patch				-> to utworzy plik "ostrich-slurm-14.03.0.patch"
   3) zaaplikowac ten patch do kodu slurma		-> patche tworzone aby dzialaly z "patch -p1"
   4) (opcjonalnie) zaaplikowac "0001-priority-plugin-support-14.03.patch"
-  5) zmienic w konfigu PriorityType na "priority/ostrich"
+  5) uruchomic ./autogen.sh z katalogu Slurma, w celu utworzenia nowych makefiles
+  6) uruchomic ./configure z wybranymi opcjami
+  7) po kompilacji zmienic w konfigu PriorityType na "priority/ostrich"
 
 wersja z patchem 0001:
   - trzeba podmienic cala instalacje slurma na ControlMashine
