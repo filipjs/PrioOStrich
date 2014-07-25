@@ -514,13 +514,14 @@ static void _load_config(void)
 		fatal("OStrich: Supports only sched/builtin or sched/backfill");
 	xfree(sched_type);
 
-	preempt_type = slurm_get_preempt_type();
-	if (strcmp(preempt_type, "preempt/none"))
-		fatal("OStrich: Supports only preempt/none");
-	xfree(preempt_type);
-
-	if (slurm_get_preempt_mode() != PREEMPT_MODE_OFF)
-		fatal("OStrich: Supports only PreemptMode=OFF");
+	// TODO POTWIERDZIC ZE DZIALA, DOPISAC W README
+// 	preempt_type = slurm_get_preempt_type();
+// 	if (strcmp(preempt_type, "preempt/none"))
+// 		fatal("OStrich: Supports only preempt/none");
+// 	xfree(preempt_type);
+// 
+// 	if (slurm_get_preempt_mode() != PREEMPT_MODE_OFF)
+// 		fatal("OStrich: Supports only PreemptMode=OFF");
 
 	req_job_age = 4 * schedule_interval;
 	if (slurmctld_conf.min_job_age > 0 && slurmctld_conf.min_job_age < req_job_age)
