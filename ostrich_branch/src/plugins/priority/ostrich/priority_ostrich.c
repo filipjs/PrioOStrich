@@ -167,8 +167,6 @@ static uint32_t _campaign_time_left(struct ostrich_campaign *camp);
 static void _load_config(void);
 static void _restore_jobs(void);
 static void _update_struct(void);
-static void _my_sleep(int secs);
-
 static void _place_waiting_job(struct job_record *job_ptr, char *part_name);
 static void _manage_incoming_jobs(void);
 static int _manage_waiting_jobs(struct ostrich_user *user,
@@ -183,6 +181,7 @@ static void _set_array_prio(struct job_record *job_ptr, uint32_t prio,
 			    struct ostrich_schedule *sched);
 static void _assign_priorities(struct ostrich_schedule *sched);
 
+static void _my_sleep(int secs);
 static void *_ostrich_agent(void *no_data);
 static void _stop_ostrich_agent(void);
 
@@ -528,6 +527,9 @@ static void _load_config(void)
 		fatal("OStrich: MinJobAge must be greater or equal to %d", req_job_age);
 }
 
+/* _restore_jobs - reintroduce jobs to the system after a restart
+ * global: job_list - pointer to slurm job list
+ */
 static void _restore_jobs(void)
 {
 	struct job_record *job_ptr;
@@ -544,10 +546,9 @@ static void _restore_jobs(void)
 	}
 }
 
-
 /* _update_struct - update the internal list of virtual schedules,
  *	keep one schedule per existing partition
- * global: part_list - pointer to global partition list
+ * global: part_list - pointer to slurm partition list
  */
 static void _update_struct(void)
 {
@@ -598,18 +599,6 @@ static void _update_struct(void)
 
 	list_iterator_destroy(iter);
 }
-
-static void _my_sleep(int secs)
-{
-	struct timespec ts = {0, 0};
-
-	ts.tv_sec = time(NULL) + secs;
-	pthread_mutex_lock(&term_lock);
-	if (!stop_thread)
-		pthread_cond_timedwait(&term_cond, &term_lock, &ts);
-	pthread_mutex_unlock(&term_lock);
-}
-
 
 /* _place_waiting_job - put the job to the owners waiting list in the specified partition */
 static void _place_waiting_job(struct job_record *job_ptr, char *part_name)
@@ -1018,6 +1007,17 @@ static void _assign_priorities(struct ostrich_schedule *sched)
 	list_destroy(all_campaigns);
 }
 
+
+static void _my_sleep(int secs)
+{
+	struct timespec ts = {0, 0};
+
+	ts.tv_sec = time(NULL) + secs;
+	pthread_mutex_lock(&term_lock);
+	if (!stop_thread)
+		pthread_cond_timedwait(&term_cond, &term_lock, &ts);
+	pthread_mutex_unlock(&term_lock);
+}
 
 static void *_ostrich_agent(void *no_data)
 {
