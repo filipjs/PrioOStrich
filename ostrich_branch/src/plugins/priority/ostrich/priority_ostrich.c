@@ -38,6 +38,8 @@
 #define DEFAULT_NORM_SHARE 0.01
 #define MINIMUM_NORM_SHARE 0.000001
 
+#define INITIAL_PRIO 2 /* initial priority of all new jobs, must be >= 0 */
+
 /* Mode flags */
 #define MODE_FLAG_ONLY_ASSOC 0x00000000 /* use only associations */
 #define MODE_FLAG_NO_ASSOC   0x00000001 /* do not use associations */
@@ -293,8 +295,8 @@ static void _print_debug_info(struct job_record *job_ptr, uint32_t camp_id,
 		pred_cpus,				/* predicted cpu count */
 		job_state_string(job_ptr->job_state)	/* job state */
 	);
-	
-	if (job_ptr->details) 
+
+	if (job_ptr->details)
 		verbose("OStrich Log: Job extra details: %d %d %d %d %d",
 			job_ptr->job_id,
 			job_ptr->details->share_res,
@@ -349,7 +351,7 @@ static uint32_t _serial_resources(struct job_record *job_ptr)
 
 static uint32_t _linear_resources(struct job_record *job_ptr)
 {
-	// TODO 
+	// TODO
 	return 1;
 }
 
@@ -357,12 +359,12 @@ static uint32_t _cons_resources(struct job_record *job_ptr)
 {
 	//TODO can be better?
 	uint32_t job_size_nodes, job_size_cpus;
-	
+
 	if (job_ptr->details->min_nodes == NO_VAL)
 		job_size_nodes = 1;
 	else
 		job_size_nodes = job_ptr->details->min_nodes;
-	
+
 	if (job_ptr->details->min_cpus == NO_VAL)
 		job_size_cpus = 1;
 	else
@@ -518,13 +520,16 @@ static void _load_config(void)
 // 	if (strcmp(preempt_type, "preempt/none"))
 // 		fatal("OStrich: Supports only preempt/none");
 // 	xfree(preempt_type);
-// 
+//
 // 	if (slurm_get_preempt_mode() != PREEMPT_MODE_OFF)
 // 		fatal("OStrich: Supports only PreemptMode=OFF");
 
 	req_job_age = 4 * schedule_interval;
 	if (slurmctld_conf.min_job_age > 0 && slurmctld_conf.min_job_age < req_job_age)
 		fatal("OStrich: MinJobAge must be greater or equal to %d", req_job_age);
+
+	if (INITIAL_PRIO < 0)
+		fatal("OStrich: INITIAL_PRIO must be greater or equal to zero");
 }
 
 /* _restore_jobs - reintroduce jobs to the system after a restart
@@ -541,7 +546,7 @@ static void _restore_jobs(void)
 		job_iter = list_iterator_create(job_list);
 		while ((job_ptr = (struct job_record *) list_next(job_iter)))
 			if (!IS_JOB_FINISHED(job_ptr))
-				list_enqueue(incoming_jobs, job_ptr);
+				job_ptr->priority = priority_p_set(0, job_ptr);
 		list_iterator_destroy(job_iter);
 	}
 }
@@ -584,7 +589,7 @@ static void _update_struct(void)
 		}
 		/* Set/update priority. */
 		sched->priority = part_ptr->priority;
-		/* Set/update max_time. 
+		/* Set/update max_time.
 		 * Values are in minutes, change to seconds. */
 		if (part_ptr->max_time == NO_VAL || part_ptr->max_time == INFINITE)
 			sched->max_time = DEFAULT_PART_LIMIT * 60;
@@ -756,7 +761,7 @@ static int _manage_waiting_jobs(struct ostrich_user *user,
 		}
 	}
 	/* Note: if a remaining job from the waiting list is updated,
-	 * it will be re-introduced to the system. 
+	 * it will be re-introduced to the system.
 	 * There is no need to validate them.
 	 */
 	list_iterator_destroy(camp_iter);
@@ -811,7 +816,7 @@ static int _update_camp_workload(struct ostrich_user *user,
 				list_remove(job_iter);
 				continue;
 			}
-			/* Note: if a job is updated, it will be re-introduced to the system. 
+			/* Note: if a job is updated, it will be re-introduced to the system.
 			* There is no need to manually put it back to 'incoming_jobs'.
 			*/
 
@@ -973,14 +978,14 @@ static void _assign_priorities(struct ostrich_schedule *sched)
 		job_iter = list_iterator_create(camp->jobs);
 		while ((job_ptr = (struct job_record *) list_next(job_iter))) {
 			if (IS_JOB_PENDING(job_ptr) ||
-			    job_ptr->priority == 1) {
+			    job_ptr->priority == INITIAL_PRIO) {
 
 				prio = fs_prio + js_prio + sched->priority;
-				if (prio < 2)
-					prio = 2;
+				if (prio < INITIAL_PRIO + 1)
+					prio = INITIAL_PRIO + 1;
 
 				if (!job_ptr->prio_factors)
-					job_ptr->prio_factors = 
+					job_ptr->prio_factors =
 						xmalloc(sizeof(priority_factors_object_t));
 
 				if (job_ptr->part_ptr &&
@@ -1049,7 +1054,7 @@ static void *_ostrich_agent(void *no_data)
 
 		if (stop_thread)
 			break;
-		
+
 		lock_slurmctld(all_locks);
 
 		START_TIMER;
@@ -1075,12 +1080,12 @@ static void *_ostrich_agent(void *no_data)
 
 			prev_allocated = sched->working_cpus;
 			sched->working_cpus = 0;
-			
+
 			list_for_each(sched->users,
 				      (ListForF) _update_camp_workload,
 				      sched);
 
-			/* Always pretend to use at least one CPU 
+			/* Always pretend to use at least one CPU
 			 * to account for time counting errors. */
 			sched->working_cpus = MAX(sched->working_cpus, 1);
 
@@ -1094,7 +1099,7 @@ static void *_ostrich_agent(void *no_data)
 			}
 
 			sched->total_shares = 0;
-			
+
 			list_for_each(sched->users,
 				      (ListForF) _update_user_activity,
 				      sched);
@@ -1174,9 +1179,9 @@ int fini ( void )
  * The remainder of this file implements the standard SLURM priority API.
  */
 
-/* 
+/*
  * NOTE: must be called while holding slurmctld_lock_t
- */ 
+ */
 extern uint32_t priority_p_set(uint32_t last_prio, struct job_record *job_ptr)
 {
 	static int resv_queue = 100000000;
@@ -1193,7 +1198,7 @@ extern uint32_t priority_p_set(uint32_t last_prio, struct job_record *job_ptr)
 		return resv_queue--;
 
 	list_enqueue(incoming_jobs, job_ptr);
-	return 1;
+	return INITIAL_PRIO;
 }
 
 extern void priority_p_reconfig(bool assoc_clear)
@@ -1257,7 +1262,7 @@ static int _filter_job(struct job_record *job_ptr, List req_job_list,
 	return filter;
 }
 
-/* This code is copied from priority/multifactor (v14.03) to enable 
+/* This code is copied from priority/multifactor (v14.03) to enable
  * the use of the 'sprio' command.
  */
 extern List priority_p_get_priority_factors_list(
@@ -1338,7 +1343,7 @@ extern List priority_p_get_priority_factors_list(
 	return ret_list;
 }
 
-/* This code is copied from priority/basic (v14.03) to maintain 
+/* This code is copied from priority/basic (v14.03) to maintain
  * valid values of 'grp_used_cpu_run_secs'.
  */
 extern void priority_p_job_end(struct job_record *job_ptr)
