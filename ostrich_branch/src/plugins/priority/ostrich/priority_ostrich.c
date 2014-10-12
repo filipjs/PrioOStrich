@@ -86,6 +86,15 @@ const char plugin_name[]       	= "Priority OStrich plugin";
 const char plugin_type[]       	= "priority/ostrich";
 const uint32_t plugin_version	= 100;
 
+/*********** functions from the priority plugin API ***********/
+extern uint32_t priority_p_set(uint32_t last_prio, struct job_record *job_ptr);
+extern void priority_p_reconfig(bool assoc_clear);
+extern void priority_p_set_assoc_usage(slurmdb_association_rec_t *assoc);
+extern double priority_p_calc_fs_factor(long double usage_efctv,
+					 long double shares_norm);
+extern List priority_p_get_priority_factors_list(
+	priority_factors_request_msg_t *req_msg, uid_t uid);
+extern void priority_p_job_end(struct job_record *job_ptr);
 
 /*********************** local structures *********************/
 struct ostrich_schedule {		/* one virtual schedule per partition */
@@ -516,6 +525,7 @@ static void _load_config(void)
 	xfree(sched_type);
 
 	// TODO POTWIERDZIC ZE DZIALA, DOPISAC W README
+	// TODO preempt partition jest OK, ale GANG juz nie??
 // 	preempt_type = slurm_get_preempt_type();
 // 	if (strcmp(preempt_type, "preempt/none"))
 // 		fatal("OStrich: Supports only preempt/none");
@@ -889,11 +899,11 @@ static int _update_user_activity(struct ostrich_user *user,
 
 		if (_campaign_time_left(camp) == 0) {
 			/* Campaign ended in the virtual schedule. */
-			if (list_is_empty(camp->jobs))
-//TODO HM>> W SYMULATORZE NIE SA USUWAN JESLI NIE MINIE THRESHOLD
-//TODO CZY JEDNAK TO SPRWDZAC TUTAJ?? BYL KONTRPRZYKLAD??
+			if (list_is_empty(camp->jobs) &&
+				time(NULL) > camp->accept_point) {
 				/* It also ended in the real schedule. */
 				list_delete_item(iter);
+			}
 		} else {
 			/* Campaign is active. */
 			user->active_campaigns++;
@@ -1214,7 +1224,7 @@ extern void priority_p_set_assoc_usage(slurmdb_association_rec_t *assoc)
 }
 
 extern double priority_p_calc_fs_factor(long double usage_efctv,
-					long double shares_norm)
+					 long double shares_norm)
 {
 	return 0;
 }
