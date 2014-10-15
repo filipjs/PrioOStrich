@@ -1,7 +1,8 @@
 Base concepts of the OStrich algorithm can be found here:
 http://www.mimuw.edu.pl/~krzadca/ostrich/index.html
 
-TODO - a moze tutaj jakis krotki opis, np w jakis sposob uzywane sa "shares"?
+This version is specifically made for SLURM version 14.03.
+For the newest version check filipjs/OStrichSlurm.
 
 To enable full functionality of the plugin, SLURM version 14.11 is required (coming in November).
 In the meantime:
